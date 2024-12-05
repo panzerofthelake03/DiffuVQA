@@ -1,0 +1,21 @@
+rounding.py
+
+1. `get_knn(model_emb, text_emb, dist='cos')`
+这个函数用于计算模型嵌入（`model_emb`）和文本嵌入（`text_emb`）之间的 K 最近邻（KNN）。它支持两种距离度量：余弦距离（`cos`）和 L2 距离（`l2`）。函数返回每个文本嵌入的最近的 K 个模型嵌入的值和索引。
+
+2. `get_efficient_knn(model_emb, text_emb)`
+这个函数是 `get_knn` 的一个更高效的实现，专门用于计算最近邻。它通过计算嵌入向量的平方和和矩阵乘法来优化距离计算，适用于大规模数据处理。
+
+3. `rounding_func(text_emb_lst, model, tokenizer, emb_scale_factor=1.0)`
+这个函数接收一系列文本嵌入，使用模型嵌入来找到每个文本嵌入的最近邻，并使用 tokenizer 将这些索引解码回文本。这个函数用于将嵌入向量“四舍五入”到最接近的有效嵌入。
+
+4. `compute_logp(args, model, x, input_ids)`
+这个函数计算给定输入嵌入 `x` 和目标输出 `input_ids` 的对数概率。它使用高斯分布模型来评估输入和目标之间的差异，并计算交叉熵损失。这个函数通常用于生成模型的训练过程中，评估模型输出的质量。
+
+5. `get_weights(model, args)`
+这个函数用于从模型中提取或调整权重。如果模型具有 transformer 层，它会从这些层中提取权重，并根据 `args.emb_scale_factor` 调整这些权重。这个函数用于模型初始化或权重调整。
+
+6. `denoised_fn_round(args, model, text_emb, t)`
+这个函数用于去噪和四舍五入文本嵌入。它首先将文本嵌入调整到合适的形状，然后使用 `get_efficient_knn` 函数找到最接近的模型嵌入。最后，它使用这些嵌入来生成新的、去噪的嵌入向量。这个函数在处理噪声数据或进行数据清洗时非常有用。
+
+这些函数共同支持一个复杂的嵌入处理流程，包括嵌入的生成、调整、去噪和评估，适用于深度学习和自然语言处理中的多种应用场景。
