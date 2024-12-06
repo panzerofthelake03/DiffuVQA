@@ -1,4 +1,4 @@
-# **DiffuVQA: Diffusion Model for Medical Visual Question Answering**
+# **Redefining Medical Visual Question An-swering Using Conditional Generative Dif-fusion Models**
 ## Abstract
 <div  align="center">    
 <img src="./img/DiffuVQA.png" 
