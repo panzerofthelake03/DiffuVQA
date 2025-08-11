@@ -1,11 +1,12 @@
-# **Redefining Medical Visual Question Answering Using Conditional Generative Diffusion Models**
+# **Redefining medical visual question answering using conditional generative diffusion models**
 ## Abstract
+Medical Visual Question Answering (Med-VQA) aims to provide answers to clinical questions based on medical images, offering support in diagnostic decision-making. However, most existing methods frame this task as a classification problem, limiting outputs to predefined answers and lacking the ability to model complex, interpretable reasoning. In this work, we redefine Med-VQA as a conditional generative task and present DiffuVQA, a novel diffusion-based model that generates open-ended answers conditioned on multimodal information. DiffuVQA introduces two key strategies to enhance reasoning and contextual grounding. First, fused image-question features are embedded as conditional signals in the reverse diffusion process to guide answer generation. Second, to address the bias of reverse-only conditioning, we propose Conditional Information Gaussian Noising, which integrates the fused features into the forward process, enabling dual conditioning without altering the diffusion model’s probabilistic structure. Extensive experiments on three public Med-VQA datasets show that DiffuVQA achieves state-of-the-art performance compared to existing generative approaches, demonstrating superior flexibility, accuracy, and interpretability. Code is available at https://github.com/cloneiq/DiffuVQA
 <div  align="center">    
 <img src="./img/DiffuVQA.png" 
 width = "700" height = "250" 
 alt="1" align=center />
 </div>
-
+The paper has been published in Biomedical Signal Processing and Control.
 
 ## Preparation
 ```bash
