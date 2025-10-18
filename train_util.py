@@ -171,24 +171,35 @@ class TrainLoop:
         #             return
         #     self.step += 1
         #     print(self.step)
+        # Run for a total number of steps given by self.learning_steps.
+        # This treats `--learning_steps` as the total optimizer steps the user
+        # expects (not the number of epochs). We iterate through the dataset
+        # and stop once the requested number of steps is reached.
+        data_iter = iter(self.data)
         from tqdm import tqdm
-        for epoch in range(self.learning_steps):
-            for image, cond in self.data:
-                self.run_step(image, cond)
-                if self.step % self.log_interval == 0:
-                    logger.dumpkvs()
-                if self.eval_data is not None and self.step % self.eval_interval == 0:
-                    batch_eval, cond_eval = next(self.eval_data)
-                    self.forward_only(batch_eval, cond_eval)
-                    print('eval on validation set')
-                    logger.dumpkvs()
-                if self.step > 0 and self.step % self.save_interval == 0:
-                    self.save()
-                    # Run for a finite amount of time in integration tests.
-                    if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
-                        return
-                self.step += 1
-                print(f'Epoch: {epoch}, Step: {self.step}')
+        while (not self.learning_steps) or (self.step < self.learning_steps):
+            try:
+                image, cond = next(data_iter)
+            except StopIteration:
+                # Recreate the iterator when the dataset is exhausted
+                data_iter = iter(self.data)
+                image, cond = next(data_iter)
+
+            self.run_step(image, cond)
+            if self.step % self.log_interval == 0:
+                logger.dumpkvs()
+            if self.eval_data is not None and self.step % self.eval_interval == 0:
+                batch_eval, cond_eval = next(self.eval_data)
+                self.forward_only(batch_eval, cond_eval)
+                print('eval on validation set')
+                logger.dumpkvs()
+            if self.step > 0 and self.step % self.save_interval == 0:
+                self.save()
+                # Run for a finite amount of time in integration tests.
+                if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
+                    return
+            self.step += 1
+            print(f'Step: {self.step}')
         # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:
             self.save()

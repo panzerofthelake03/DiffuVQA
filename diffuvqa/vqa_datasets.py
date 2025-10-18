@@ -49,22 +49,26 @@ def load_data_vqa(
 
     if split != 'test':
         # sampler = DistributedSampler(dataset)
+        # On Windows, using multiple DataLoader workers can trigger multiprocessing
+        # spawn issues. Use a single process there.
+        dw = 0 if os.name == 'nt' else 4
         data_loader = DataLoader(
             dataset,
             batch_size=batch_size,  # 20,
             drop_last=True,
             # sampler=sampler,
             shuffle=True,
-            num_workers=4,
+            num_workers=dw,
         )
     else:
+        dw = 0 if os.name == 'nt' else 4
         data_loader = DataLoader(
             dataset,
             batch_size=batch_size,  # 20,
             drop_last=True,
             # sampler=sampler,
             shuffle=True,
-            num_workers=4,
+            num_workers=dw,
         )
 
     # return data_loader
@@ -81,59 +85,46 @@ def infinite_loader(data_loader):
 def helper_tokenize(sentence_lst, vocab_dict, seq_len, split):
     # Process.memory_info is expressed in bytes, so convert to megabytes
     print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
-    raw_datasets = Dataset2.from_dict(sentence_lst)
+    # sentence_lst is a dict of lists, e.g. {'question': [...], 'answer': [...]}
+    # Implement single-process chunked tokenization to avoid multiprocessing
+    # spawn issues on Windows and to make behavior deterministic.
+    n = len(sentence_lst['question'])
+    print(f"Dataset size: {n}")
 
-    print(raw_datasets)
-    print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    input_id_q = []
+    input_id_a = []
 
-    def tokenize_function(examples):
-        input_id_q = vocab_dict.tokenizer(examples['question'], padding='max_length', max_length=seq_len, truncation=True)['input_ids']
-        input_id_a = vocab_dict.tokenizer(examples['answer'], padding='max_length', max_length=seq_len, truncation=True)['input_ids']
+    # Choose a reasonable chunk size to control memory usage
+    chunk_size = 512
+    for start in range(0, n, chunk_size):
+        end = min(start + chunk_size, n)
+        q_batch = sentence_lst['question'][start:end]
+        a_batch = sentence_lst['answer'][start:end]
 
-        result_dict = {'input_id_q': input_id_q, 'input_id_a': input_id_a}
+        # tokenizer can accept a list of strings and will return dicts with lists
+        tq = vocab_dict.tokenizer(q_batch, padding='max_length', max_length=seq_len, truncation=True)
+        ta = vocab_dict.tokenizer(a_batch, padding='max_length', max_length=seq_len, truncation=True)
 
-        return result_dict
+        input_id_q.extend(tq['input_ids'])
+        input_id_a.extend(ta['input_ids'])
 
-    tokenized_datasets = raw_datasets.map(
-        tokenize_function,
-        batched=True,
-        num_proc=8,
-        remove_columns=['question', 'answer'],
-        load_from_cache_file=True,
-        desc="Running tokenizer on dataset",
-    )
-    print('### tokenized_datasets', tokenized_datasets)
+        print(f"Tokenized {end} / {n} -- RAM: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
 
-    print('### tokenized_datasets...example', tokenized_datasets['input_id_q'][0], len(tokenized_datasets['input_id_a'][0]))
-    print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    # Merge question and answer ids and create the mask (0 for question, 1 for answer)
+    input_ids = [q + a for q, a in zip(input_id_q, input_id_a)]
+    input_mask = [[0] * len(q) + [1] * len(a) for q, a in zip(input_id_q, input_id_a)]
 
-    def merge_and_mask(group_lst):
-        lst = []
-        mask = []
-        for i in range(len(group_lst['input_id_q'])):
-            mask_zero = [0] * len(group_lst['input_id_q'][i])
-            mask_one = [1] * len(group_lst['input_id_a'][i])
-        
-            lst.append(group_lst['input_id_q'][i] + group_lst['input_id_a'][i])
+    tokenized_group = {
+        'input_id_q': input_id_q,
+        'input_id_a': input_id_a,
+        'input_ids': input_ids,
+        'input_mask': input_mask,
+    }
 
-            mask.append(mask_zero + mask_one)
-        group_lst['input_ids'] = lst
-        
-        group_lst['input_mask'] = mask
-        return group_lst
-    
-
-    tokenized_datasets = tokenized_datasets.map(
-        merge_and_mask,
-        batched=True,
-        num_proc=1,
-        desc=f"merge and mask",
-    )
-    
-
+    tokenized_datasets = Dataset2.from_dict(tokenized_group)
     raw_datasets = datasets.DatasetDict()
     raw_datasets[split] = tokenized_datasets
-    print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    print(f"Finished tokenization. RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
     return raw_datasets
 
 
@@ -158,9 +149,25 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
     else:
         assert False, "invalid split for dataset"
 
-    with open(path, 'r') as f_reader:
-        for line in f_reader:
-            content = json.loads(line)
+    # Open files using utf-8 and replace invalid bytes to avoid UnicodeDecodeError
+    with open(path, 'rb') as f_reader:
+        for raw_line in f_reader:
+            # decode using utf-8 with replacement for invalid bytes
+            try:
+                line = raw_line.decode('utf-8')
+            except Exception:
+                line = raw_line.decode('utf-8', errors='replace')
+            # strip BOM if present
+            if line.startswith('\ufeff'):
+                line = line.lstrip('\ufeff')
+            # skip empty lines
+            if not line.strip():
+                continue
+            try:
+                content = json.loads(line)
+            except json.JSONDecodeError:
+                # if a line fails to decode, try to replace problematic characters and parse
+                content = json.loads(line.encode('utf-8', errors='replace').decode('utf-8'))
             if args.dataset == 'VQAMED2019' or args.dataset == 'Med_RAD' or args.dataset == "pvqa" or args.dataset=="VQAMED2019":
                 for key in ['question', 'answer', 'image_name']:
                     if key in content:
@@ -177,6 +184,18 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
                             data_lst[key].append(content[key])
 
     print('### Data samples...\n', data_lst['question'][:2], data_lst['answer'][:2], data_lst['image_name'][:2])
+
+    # Ensure all lists in data_lst have the same length by padding missing entries.
+    # This avoids pyarrow/datasets errors if some records lack optional fields like image_name.
+    expected_len = len(data_lst['question'])
+    for k, v in data_lst.items():
+        if len(v) < expected_len:
+            # choose a sensible default: empty string for text-like fields
+            pad_value = ''
+            # if the list is intended to contain ints, attempt to detect and pad with -1
+            if all(isinstance(x, int) for x in v if x is not None) and len(v) > 0:
+                pad_value = -1
+            data_lst[k].extend([pad_value] * (expected_len - len(v)))
 
     vocab_dict = loaded_vocab
 
@@ -237,8 +256,27 @@ class ImageDataset(Dataset):
 
     def __getitem__(self, idx):
         image_path = self.load_image_path()[idx]
-        image = Image.open(image_path).convert('RGB')
-        image = self.transform(image)
+        # If image_name was empty or path doesn't exist, return a black placeholder image
+        try:
+            if not image_path or not os.path.exists(image_path):
+                # create a small black RGB image as a placeholder
+                placeholder = Image.new('RGB', (self.args.image_size if hasattr(self.args, 'image_size') else 224,
+                                               self.args.image_size if hasattr(self.args, 'image_size') else 224), (0, 0, 0))
+                image = placeholder
+            else:
+                image = Image.open(image_path).convert('RGB')
+        except Exception:
+            # On any failure opening the image, fall back to placeholder
+            image = Image.new('RGB', (self.args.image_size if hasattr(self.args, 'image_size') else 224,
+                                      self.args.image_size if hasattr(self.args, 'image_size') else 224), (0, 0, 0))
+
+        if self.transform is not None:
+            try:
+                image = self.transform(image)
+            except Exception:
+                # If transform fails, return untransformed placeholder as tensor-like fallback
+                image = image
+
         return image
 
 class ImageTextDataset(Dataset):

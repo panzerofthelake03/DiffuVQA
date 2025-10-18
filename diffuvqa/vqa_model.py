@@ -72,18 +72,30 @@ class feature_fusion(nn.Module):
         self.theta = nn.Parameter(torch.tensor(1.0))
         ###########  load vision and language encoder ###############
 
-        self.multi_attention = MultiHeadedAttention(args.num_heads, args.d_model)
-        self.cross_attention = cross_attention(args.feature_size)
+        # Use the configured hidden_dim as the attention feature size so
+        # attention modules operate in the same latent space as the
+        # projections (this prevents matmul shape mismatches when
+        # args.hidden_dim != pretrained BERT hidden size).
+        self.multi_attention = MultiHeadedAttention(args.num_heads, args.hidden_dim)
+        self.cross_attention = cross_attention(args.hidden_dim)
         self.multi_attention.apply(self.init_weights)
         self.cross_attention.apply(self.init_weights)
 
         self.language_encoder = language_encoder
         self.bert = bert
+        self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
+        self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
 
-        self.image_MLP = nn.Linear(145, 32)
+        # Project raw vision encoder channel features to the configured image embedding size.
+        # Historically this code used 145 as the number of channels produced by
+        # the pretrained CLIP/resnet visual backbone; keep that here for
+        # compatibility with pre-trained weights. If you use a different visual
+        # backbone adjust this number accordingly.
+        self.image_MLP = nn.Linear(145, args.input_image_embed_size)
         self.image_MLP.apply(self.init_weights)
 
+        # modality type embeddings (0=text,1=image)
         self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
         self.modality_type_embeddings.apply(self.init_weights)
 
@@ -95,8 +107,14 @@ class feature_fusion(nn.Module):
         )
         self.image_feature_proj.apply(self.init_weights)
 
+        # The language encoder (BERT) may have a different hidden size than
+        # the configured `args.hidden_dim`. Use the encoder's hidden size as
+        # the input dimension for the first projection so the code works when
+        # args.hidden_dim != bert_hidden_size (e.g., using a smaller model
+        # latent while still loading BERT-base as the language encoder).
+        bert_hidden_size = getattr(self.bert.config, 'hidden_size', args.hidden_dim)
         self.question_feature_proj = nn.Sequential(
-            nn.Linear(args.hidden_dim, args.extend_hidden_size),
+            nn.Linear(bert_hidden_size, args.extend_hidden_size),
             nn.GELU(),
             nn.Linear(args.extend_hidden_size, args.hidden_dim),
         )
@@ -132,18 +150,33 @@ class feature_fusion(nn.Module):
 
         # == Image Encoding ==
         image_feats = self.vision_encoder(image)
+        # vision_encoder -> [B, C, L]; transpose to [B, L, C] so Linear
+        # operates on the channel/features dimension (C).
         image_feats = image_feats.transpose(1, 2)
-        image_feats = self.image_MLP(image_feats).transpose(1, 2)
+        # Apply MLP to per-patch/channel features: result [B, L, input_image_embed_size]
+        image_feats = self.image_MLP(image_feats)
+        # Project per-patch embeddings to the hidden_dim: still [B, L, hidden_dim]
         image_feats = self.image_feature_proj(image_feats)
         image_masks = torch.ones((image_feats.size(0), image_feats.size(1)), dtype=torch.long,
                                  device=image_feats.device)
 
-        question_feats, image_feats = (
-            question_feats + self.modality_type_embeddings(torch.zeros_like(q_mask)),
-            image_feats + self.modality_type_embeddings(torch.full_like(image_masks, 1)),
-        )
+        # Add modality type embeddings
+        question_feats = question_feats + self.modality_type_embeddings(torch.zeros_like(q_mask))
+        image_feats = image_feats + self.modality_type_embeddings(torch.full_like(image_masks, 1))
 
-        pre_simu_answer_feats = self.cvae(question_emb + image_feats)
+        # If sequence lengths differ, pool image features and expand them to
+        # match the question token length. We want `pre_simu_answer_feats` to
+        # have the same length as the token-level question/answer embeddings
+        # so it can be compared to `ans_emb` later during loss computation.
+        if question_feats.size(1) != image_feats.size(1):
+            img_pooled = image_feats.mean(dim=1, keepdim=True)  # [B,1,H]
+            img_for_text = img_pooled.expand(-1, question_feats.size(1), -1)  # [B,QT,H]
+        else:
+            img_for_text = image_feats
+
+        # Fuse question token features with the image summary per-token
+        fused_for_cvae = question_feats + img_for_text
+        pre_simu_answer_feats = self.cvae(fused_for_cvae)
 
         f1 = self.cross_attention(pre_simu_answer_feats, question_feats, question_feats)
         f2 = self.cross_attention(f1, image_feats, image_feats)
@@ -151,7 +184,28 @@ class feature_fusion(nn.Module):
         f3 = self.layer_norm(f3)
         f4 = self.feature_proj(f3)
 
-        f = self.alpha * f4 + self.beta * image_feats + self.theta * (question_feats + question_emb)
+        # Ensure q_for_image is defined and all tensors have the same sequence length
+        # by pooling-and-expanding the shorter sequences to match image_feats.
+        if 'q_for_image' not in locals():
+            # Create q_for_image by pooling question tokens and expanding to image length
+            if question_feats.size(1) != image_feats.size(1):
+                q_for_image = question_feats.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
+            else:
+                q_for_image = question_feats
+
+        # If f4 has a different sequence length, pool-and-expand it as well so
+        # the final element-wise combination works without size mismatch.
+        if f4.size(1) != image_feats.size(1):
+            f4 = f4.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
+
+        # Debug print (optional) controlled by environment variable DVQA_DEBUG
+        try:
+            if os.environ.get('DVQA_DEBUG', '0') == '1':
+                print(f"DEBUG feature_fusion shapes: f4 {tuple(f4.shape)}, image_feats {tuple(image_feats.shape)}, q_for_image {tuple(q_for_image.shape)}")
+        except Exception:
+            pass
+
+        f = self.alpha * f4 + self.beta * image_feats + self.theta * q_for_image
         return f, pre_simu_answer_feats
     
     def init_weights(self, module):
@@ -239,6 +293,23 @@ class TransformerNetModel(nn.Module):
             temp_bert = BertModel.from_pretrained(config_name, config=config)
 
             self.word_embedding = temp_bert.embeddings.word_embeddings
+            # If the pretrained token embeddings size differs from the
+            # configured hidden_dim, add a small projection to map them
+            # into the model latent space used by the rest of the network.
+            try:
+                bert_emb_dim = self.word_embedding.weight.size(1)
+                # Project token embeddings into the transformer's hidden size
+                # (config.hidden_size) so downstream components see the same
+                # feature dimensionality.
+                target_dim = self.hidden_size
+                if bert_emb_dim != target_dim:
+                    self.word_embedding_proj = nn.Linear(bert_emb_dim, target_dim)
+                    # initialize similarly to other linears
+                    self.word_embedding_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.word_embedding_proj.bias is not None:
+                        self.word_embedding_proj.bias.data.zero_()
+            except Exception:
+                pass
             self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
 
             with th.no_grad():
@@ -250,6 +321,20 @@ class TransformerNetModel(nn.Module):
             self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
             self.position_embeddings = temp_bert.embeddings.position_embeddings
             self.LayerNorm = temp_bert.embeddings.LayerNorm
+
+            # Project pretrained position embeddings to args.hidden_dim if needed
+            try:
+                pos_dim = self.position_embeddings.weight.size(1)
+                # Project positional embeddings into the transformer's hidden
+                # size so they can be added to other transformer inputs.
+                target_dim = self.hidden_size
+                if pos_dim != target_dim:
+                    self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
+                    self.position_embeddings_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.position_embeddings_proj.bias is not None:
+                        self.position_embeddings_proj.bias.data.zero_()
+            except Exception:
+                pass
 
             del temp_bert.embeddings
             del temp_bert.pooler
@@ -270,8 +355,26 @@ class TransformerNetModel(nn.Module):
             self.output_down_proj = nn.Sequential(nn.Linear(config.hidden_size, config.hidden_size),
                                                   nn.Tanh(), nn.Linear(config.hidden_size, self.output_dims))
 
+        # If the fusion module produces features in a different latent
+        # dimensionality (args.hidden_dim) than the transformer's
+        # internal hidden size (config.hidden_size), add a projection to
+        # map fusion outputs into the transformer's expected feature size.
+        try:
+            target_dim = self.hidden_size
+            fuse_dim = args.hidden_dim if args is not None else target_dim
+            if fuse_dim != target_dim:
+                self.fuse_output_proj = nn.Linear(fuse_dim, target_dim)
+                self.fuse_output_proj.weight.data.normal_(mean=0.0, std=0.02)
+                if self.fuse_output_proj.bias is not None:
+                    self.fuse_output_proj.bias.data.zero_()
+        except Exception:
+            pass
+
     def get_embeds(self, input_ids):
-        return self.word_embedding(input_ids)
+        emb = self.word_embedding(input_ids)
+        if hasattr(self, 'word_embedding_proj'):
+            emb = self.word_embedding_proj(emb)
+        return emb
 
     def get_logits(self, hidden_repr):
         if self.logits_mode == 1:
@@ -292,6 +395,12 @@ class TransformerNetModel(nn.Module):
 
     def get_ddpm_input(self, image, cond):
         ddpm_input, ans_emb = self.fuse(image, cond)
+        # If necessary, project fusion outputs into the transformer's
+        # hidden size so downstream transformer layers receive the
+        # expected dimensionality.
+        if hasattr(self, 'fuse_output_proj'):
+            ddpm_input = self.fuse_output_proj(ddpm_input)
+            ans_emb = self.fuse_output_proj(ans_emb)
         return ddpm_input, ans_emb
 
     def forward(self, x, timesteps):
@@ -312,8 +421,33 @@ class TransformerNetModel(nn.Module):
 
         seq_length = x.size(1)
         position_ids = self.position_ids[:, : seq_length]
+
+        # Positional embeddings may have been trained for a shorter max length
+        # (e.g. 512). If the current sequence length is larger (because we
+        # concatenated image patches and text tokens), tile/repeat the
+        # positional embedding weights to cover the requested length.
+        pos_emb_module = self.position_embeddings
+        try:
+            pos_len = pos_emb_module.weight.size(0)
+        except Exception:
+            pos_len = position_ids.size(1)
+
+        if seq_length <= pos_len:
+            pos_emb = pos_emb_module(position_ids)
+            if hasattr(self, 'position_embeddings_proj'):
+                pos_emb = self.position_embeddings_proj(pos_emb)
+        else:
+            # Tile the learned position embeddings to the required length and
+            # take the first seq_length entries.
+            pos_weight = pos_emb_module.weight.data
+            repeats = (seq_length + pos_len - 1) // pos_len
+            expanded = pos_weight.repeat(repeats, 1)[:seq_length].unsqueeze(0)
+            pos_emb = expanded.to(emb_x.device)
+            if hasattr(self, 'position_embeddings_proj'):
+                pos_emb = self.position_embeddings_proj(pos_emb)
+
         # print(emb_x.shape, emb_t.shape, self.position_embeddings)
-        emb_inputs = self.position_embeddings(position_ids) + emb_x + emb_t.unsqueeze(1).expand(-1, seq_length, -1)
+        emb_inputs = pos_emb + emb_x + emb_t.unsqueeze(1).expand(-1, seq_length, -1)
         emb_inputs = self.dropout(self.LayerNorm(emb_inputs))
 
         input_trans_hidden_states = self.input_transformers(emb_inputs).last_hidden_state

@@ -58,26 +58,52 @@ if __name__ == '__main__':
         if not os.path.isdir(Model_FILE):
             os.mkdir(Model_FILE)
 
-    COMMANDLINE = f" OPENAI_LOGDIR={Model_FILE}  " \
-                  f"TOKENIZERS_PARALLELISM=false " \
-                  f"python train.py   " \
-                  f"--checkpoint_path {Model_FILE} " \
-                  f"--dataset {args.dataset} --data_dir {args.data_dir} --vocab {args.vocab} --use_plm_init {args.use_plm_init} " \
-                  f"--lr {args.lr} " \
-                  f"--batch_size {args.bsz} --microbatch {args.microbatch} " \
-                  f"--diffusion_steps {args.diff_steps} " \
-                  f"--noise_schedule {args.noise_schedule} " \
-                  f"--schedule_sampler {args.schedule_sampler} --resume_checkpoint {args.resume_checkpoint} " \
-                  f"--seq_len {args.seq_len} --hidden_t_dim {args.hidden_t_dim} --seed {args.seed} " \
-                  f"--hidden_dim {args.hidden_dim} " \
-                  f"--learning_steps {args.learning_steps} --save_interval {args.save_interval} " \
-                  f"--config_name {args.config_name} --notes {args.notes}"
+    import subprocess
 
-    COMMANDLINE += " " + args.app
-
+    # Set environment variables properly (Windows-compatible)
+    os.environ["OPENAI_LOGDIR"] = Model_FILE
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    
+    # Build the argument list instead of one long bash string
+    # Use the same Python executable that's running this script (ensures venv packages are available)
+    cmd = [
+        sys.executable, os.path.join(dname, "train.py"),
+        "--checkpoint_path", Model_FILE,
+        "--dataset", args.dataset,
+        "--data_dir", args.data_dir,
+        "--vocab", args.vocab,
+        "--use_plm_init", args.use_plm_init,
+        "--lr", str(args.lr),
+        "--batch_size", str(args.bsz),
+        "--microbatch", str(args.microbatch),
+        "--diffusion_steps", str(args.diff_steps),
+        "--noise_schedule", args.noise_schedule,
+        "--schedule_sampler", args.schedule_sampler,
+        "--resume_checkpoint", args.resume_checkpoint,
+        "--seq_len", str(args.seq_len),
+        "--hidden_t_dim", str(args.hidden_t_dim),
+        "--seed", str(args.seed),
+        "--hidden_dim", str(args.hidden_dim),
+        "--learning_steps", str(args.learning_steps),
+        "--save_interval", str(args.save_interval),
+        "--config_name", args.config_name,
+        "--notes", args.notes
+    ]
+    
+    # Include any extra args if specified
+    if args.app:
+        cmd += args.app.split()
+    
+    # Write the command to file for logging (optional)
     if int(os.environ['LOCAL_RANK']) == 0:
-        with open(os.path.join(Model_FILE, 'saved_bash.sh'), 'w') as f:
-            print(COMMANDLINE, file=f)
-
-    print(COMMANDLINE)
-    os.system(COMMANDLINE)
+        with open(os.path.join(Model_FILE, 'saved_command.txt'), 'w') as f:
+            f.write(" ".join(cmd))
+    
+    # Print and run; capture output so errors are visible in the parent console
+    print("Running:", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        # Re-raise after printing to keep behavior similar but easier to debug
+        print(f"Training process exited with code {e.returncode}")
+        raise
