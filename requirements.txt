@@ -1,3 +1,48 @@
+# Core ML libraries
+# NOTE: For CUDA-enabled PyTorch, install the correct wheel from https://pytorch.org/ (select your CUDA)
+# Example (CUDA 11.7):
+# pip install "torch==1.13.1+cu117" -f https://download.pytorch.org/whl/torch_stable.html
+torch>=1.13.1
+torchvision>=0.14.1
+
+# Transformers & Hugging Face tooling
+transformers>=4.22.2
+datasets>=2.0.0
+tokenizers
+sentencepiece
+huggingface-hub
+accelerate
+
+# Numerical & utility
+numpy
+pyarrow
+scikit-learn
+psutil
+tqdm
+packaging
+
+# Image
+Pillow
+
+# Evaluation / NLP toolkits
+nltk
+torchmetrics
+bert_score
+pycocoevalcap
+
+# Storage / I/O
+blobfile
+
+# Logging / experiment tracking
+wandb
+
+# Misc
+PyYAML
+setuptools
+spacy
+typing-extensions
+
+# If you need a specific version for compatibility, pin packages explicitly after initial test runs.
 bert_score
 blobfile
 nltk
