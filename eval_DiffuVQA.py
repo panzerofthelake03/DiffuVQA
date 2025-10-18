@@ -13,7 +13,12 @@ from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from nltk.tokenize import word_tokenize
 
 from nltk.translate.meteor_score import meteor_score
-from pycocoevalcap.cider.cider import Cider
+try:
+    from pycocoevalcap.cider.cider import Cider
+    HAS_PYCOCOEVALCAP = True
+except Exception:
+    Cider = None
+    HAS_PYCOCOEVALCAP = False
 import nltk
 from nltk.metrics import edit_distance
 
