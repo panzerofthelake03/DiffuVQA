@@ -77,3 +77,4 @@ You need to specify the folder of decoded texts. This folder should contain the 
 cd scripts
 python eval_DiffuVQA.py --folder ../{your-path-to-outputs} --mbr
 ```
+Yakışıklılar.
