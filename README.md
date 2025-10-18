@@ -78,3 +78,5 @@ cd scripts
 python eval_DiffuVQA.py --folder ../{your-path-to-outputs} --mbr
 ```
 Yakışıklılar.
+
+Selam Barış
