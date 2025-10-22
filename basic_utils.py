@@ -63,7 +63,7 @@ class myTokenizer():
             seq = seq.squeeze(-1).tolist()
             while len(seq)>0 and seq[-1] == self.pad_token_id:
                 seq.pop()
-            tokens = self.tokenizer.decode(seq)
+            tokens = self.tokenizer.decode(seq, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         else:
             assert False, "invalid type of vocab_dict"
         return tokens

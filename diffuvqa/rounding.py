@@ -42,11 +42,29 @@ def rounding_func(text_emb_lst, model, tokenizer, emb_scale_factor=1.0):
             text_emb = text_emb.view(-1, text_emb.size(-1))
         else:
             text_emb = text_emb
+        # get_knn returns (values, indices) where indices shape is (k, seq_len)
         val, indices = get_knn((down_proj_emb2 if dist == 'cos' else model_emb),
                                 text_emb.to(model_emb.device), dist=dist)
-    
-        # decoded_out_lst.append(tokenizer.decode(indices[0]))
-        decoded_out_lst.append(tokenizer.decode_token(indices[0])) # 原版
+
+        # take top-1 nearest neighbour ids for each position
+        top1_ids = indices[0].to('cpu').tolist()
+
+        # decode ids to string using tokenizer. Prefer tokenizer.decode (list of ids -> string).
+        decoded = ''
+        try:
+            # some tokenizers expect ints list
+            decoded = tokenizer.decode(top1_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        except Exception:
+            try:
+                toks = tokenizer.convert_ids_to_tokens(top1_ids)
+                decoded = tokenizer.convert_tokens_to_string(toks)
+            except Exception:
+                # fallback: join token ids as strings
+                decoded = ' '.join([str(x) for x in top1_ids])
+
+        # final cleanup: strip and remove stray special token markers if any
+        decoded = decoded.replace('[CLS]', '').replace('[SEP]', '').strip()
+        decoded_out_lst.append(decoded)
         
     return decoded_out_lst
 

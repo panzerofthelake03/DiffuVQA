@@ -102,8 +102,8 @@ def helper_tokenize(sentence_lst, vocab_dict, seq_len, split):
         a_batch = sentence_lst['answer'][start:end]
 
         # tokenizer can accept a list of strings and will return dicts with lists
-        tq = vocab_dict.tokenizer(q_batch, padding='max_length', max_length=seq_len, truncation=True)
-        ta = vocab_dict.tokenizer(a_batch, padding='max_length', max_length=seq_len, truncation=True)
+        tq = vocab_dict.tokenizer(q_batch, padding='max_length', max_length=seq_len, truncation=True, add_special_tokens=False)
+        ta = vocab_dict.tokenizer(a_batch, padding='max_length', max_length=seq_len, truncation=True, add_special_tokens=False)
 
         input_id_q.extend(tq['input_ids'])
         input_id_a.extend(ta['input_ids'])
@@ -176,12 +176,23 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
                         else:
                             data_lst[key].append(content[key])
             else:
-                for key in ['question', 'answer', 'image_name', 'qid', 'img_id']:
+                for key in ['question', 'answer', 'qid', 'img_id']:
                     if key in content:
                         if isinstance(content[key], str):
                             data_lst[key].append(content[key].strip())
                         else:
                             data_lst[key].append(content[key])
+                # Handle img_name field from dataset and map to image_name
+                if 'img_name' in content:
+                    if isinstance(content['img_name'], str):
+                        data_lst['image_name'].append(content['img_name'].strip())
+                    else:
+                        data_lst['image_name'].append(content['img_name'])
+                elif 'image_name' in content:
+                    if isinstance(content['image_name'], str):
+                        data_lst['image_name'].append(content['image_name'].strip())
+                    else:
+                        data_lst['image_name'].append(content['image_name'])
 
     print('### Data samples...\n', data_lst['question'][:2], data_lst['answer'][:2], data_lst['image_name'][:2])
 
