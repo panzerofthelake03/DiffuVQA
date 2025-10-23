@@ -1,0 +1,1 @@
+{"image_name": "imgs/xmlab580/source.jpg", "question": "how many lungs have existed in this image?", "reference_answer": "2", "generate_answer": "##uming 2", "confidence": 0.00024346656573470682, "rationale": "Average token prob=0.000, avg_nn_l2=44.604"}

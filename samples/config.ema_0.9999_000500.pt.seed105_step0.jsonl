@@ -1,0 +1,1 @@
+{"image_name": "imgs/xmlab18/source.jpg", "question": "do the spleen look abnormal?", "reference_answer": "no", "generate_answer": "no", "confidence": 0.00023225601762533188, "rationale": "Average token prob=0.000, avg_nn_l2=44.291"}
