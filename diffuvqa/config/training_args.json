@@ -1,19 +1,19 @@
 {
   "lr": 0.0001,
   "batch_size": 4,
-  "learning_steps": 50,
+  "learning_steps": 500,
   "microbatch": 64,
-  "log_interval": 5,
-  "save_interval": 25,
+  "log_interval": 25,
+  "save_interval": 100,
   "eval_interval": 500,
   "valid": true,
   "ema_rate": "0.9999",
   "resume_checkpoint": "none",
   "schedule_sampler": "lossaware",
-  "diffusion_steps": 100,
+  "diffusion_steps": 1000,
   "noise_schedule": "sqrt",
   "timestep_respacing": [
-    100
+    50
   ],
   "vocab": "bert",
   "use_plm_init": "bert",
@@ -26,7 +26,7 @@
   "checkpoint_path": "diffuvqa/config",
   "image_encoder": "ViT-B/32",
   "image_resolution": 384,
-  "model_path": "diffuvqa/config/ema_0.9999_000050.pt",
+    "model_path": "diffuvqa/config/ema_0.9999_000500.pt",
   "input_dims": 128,
   "seq_len": 32,
   "hidden_t_dim": 768,
