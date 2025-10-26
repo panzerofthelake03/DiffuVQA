@@ -10,10 +10,10 @@
   "ema_rate": "0.9999",
   "resume_checkpoint": "none",
   "schedule_sampler": "lossaware",
-  "diffusion_steps": 1000,
+  "diffusion_steps": 2500,
   "noise_schedule": "sqrt",
   "timestep_respacing": [
-    50
+    2500
   ],
   "vocab": "bert",
   "use_plm_init": "bert",
@@ -26,7 +26,7 @@
   "checkpoint_path": "diffuvqa/config",
   "image_encoder": "ViT-B/32",
   "image_resolution": 384,
-    "model_path": "diffuvqa/config/ema_0.9999_000500.pt",
+  "model_path": "diffuvqa/config/ema_0.9999_125000.pt",
   "input_dims": 128,
   "seq_len": 32,
   "hidden_t_dim": 768,

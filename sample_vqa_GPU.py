@@ -161,7 +161,7 @@ def main():
 
     # Create a compact filename: <model_folder>.<checkpoint>.seed<seed>_step<clamp>.jsonl
     checkpoint_name = os.path.split(args.model_path)[1]
-    out_filename = f"{os.path.basename(os.path.split(args.model_path)[0])}.{checkpoint_name}.seed{args.seed2}_step{args.clamp_step}.jsonl"
+    out_filename = f"{os.path.basename(os.path.split(args.model_path)[0])}.{checkpoint_name}.seed{args.seed}_step{args.clamp_step}.jsonl"
     # Truncate filename if it's excessively long to avoid Windows path length issues.
     if len(out_filename) > 200:
         out_filename = out_filename[:200]
