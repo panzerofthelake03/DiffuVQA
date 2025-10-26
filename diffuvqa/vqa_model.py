@@ -76,10 +76,11 @@ class feature_fusion(nn.Module):
         # attention modules operate in the same latent space as the
         # projections (this prevents matmul shape mismatches when
         # args.hidden_dim != pretrained BERT hidden size).
+        assert args.hidden_dim % args.num_heads == 0, "hidden_dim must be divisible by num_heads"
         self.multi_attention = MultiHeadedAttention(args.num_heads, args.hidden_dim)
-        self.cross_attention = cross_attention(args.hidden_dim)
+        self.cross_attention = cross_attention(args.hidden_dim, head=args.num_heads)
         self.multi_attention.apply(self.init_weights)
-        self.cross_attention.apply(self.init_weights)
+        self.cross_attention.apply(self.init_weights) 
 
         self.language_encoder = language_encoder
         self.bert = bert
@@ -178,8 +179,17 @@ class feature_fusion(nn.Module):
         fused_for_cvae = question_feats + img_for_text
         pre_simu_answer_feats = self.cvae(fused_for_cvae)
 
-        f1 = self.cross_attention(pre_simu_answer_feats, question_feats, question_feats)
-        f2 = self.cross_attention(f1, image_feats, image_feats)
+        # Create attention masks
+        q_mask = cond['input_mask']  # question mask (batch, q_len) 
+        img_mask = torch.ones((image_feats.size(0), image_feats.size(1)), device=image_feats.device)
+        
+        # Make masks for cross attention (batch, seq_q, seq_k)
+        qa_mask = q_mask.unsqueeze(1) & q_mask.unsqueeze(2)  # for answer->question
+        qi_mask = q_mask.unsqueeze(1) & img_mask.unsqueeze(2)  # for fused->image
+
+        # Apply masked cross attention
+        f1 = self.cross_attention(pre_simu_answer_feats, question_feats, question_feats, mask=qa_mask)
+        f2 = self.cross_attention(f1, image_feats, image_feats, mask=qi_mask)
         f3 = self.multi_attention(f2, f2, f2)
         f3 = self.layer_norm(f3)
         f4 = self.feature_proj(f3)

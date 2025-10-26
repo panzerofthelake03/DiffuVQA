@@ -79,8 +79,8 @@ class cross_attention(nn.Module):
         self.cross_attn = MultiHeadedAttention(h=head, d_model=feature_size)
         self.layer_norm = LayerNorm(feature_size)
 
-    def forward(self, q, k, v):
-        return self.layer_norm(q + self.cross_attn(q, k, v))
+    def forward(self, q, k, v, mask=None):
+        return self.layer_norm(q + self.cross_attn(q, k, v, mask=mask))
 
 
 class cross_attention_without_residual(nn.Module):
