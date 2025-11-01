@@ -29,6 +29,8 @@ nltk
 torchmetrics
 bert_score
 pycocoevalcap
+sentence-transformers>=2.0.0  # For semantic similarity metrics
+spacy>=3.4.0                  # For named entity recognition
 
 # Storage / I/O
 blobfile
@@ -39,7 +41,6 @@ wandb
 # Misc
 PyYAML
 setuptools
-spacy
 typing-extensions
 
 # If you need a specific version for compatibility, pin packages explicitly after initial test runs.
