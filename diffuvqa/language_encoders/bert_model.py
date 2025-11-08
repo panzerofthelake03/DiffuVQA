@@ -49,10 +49,91 @@ from transformers.modeling_outputs import (
 )
 from transformers.modeling_utils import (
     PreTrainedModel,
-    apply_chunking_to_forward,
-    find_pruneable_heads_and_indices,
-    prune_linear_layer,
 )
+import torch
+
+# Handle deprecated functions from transformers.modeling_utils
+try:
+    from transformers.modeling_utils import find_pruneable_heads_and_indices, prune_linear_layer
+except ImportError:
+    # These functions were moved or removed in newer transformers versions
+    def find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):
+        """
+        Fallback implementation for find_pruneable_heads_and_indices
+        """
+        mask = torch.ones(n_heads, head_size)
+        heads = set(heads) - already_pruned_heads
+        for head in heads:
+            head = head - sum(1 if h < head else 0 for h in already_pruned_heads)
+            mask[head] = 0
+        mask = mask.view(-1).contiguous().eq(1)
+        index: torch.LongTensor = torch.arange(len(mask))[mask].long()
+        return mask, index
+
+    def prune_linear_layer(layer, index, dim=0):
+        """
+        Fallback implementation for prune_linear_layer
+        """
+        import torch.nn as nn
+        index = index.to(layer.weight.device)
+        W = layer.weight.index_select(dim, index).clone().detach()
+        if layer.bias is not None:
+            if dim == 1:
+                b = layer.bias.clone().detach()
+            else:
+                b = layer.bias[index].clone().detach()
+        new_size = list(layer.weight.size())
+        new_size[dim] = len(index)
+        new_layer = nn.Linear(new_size[1], new_size[0], bias=layer.bias is not None).to(layer.weight.device)
+        new_layer.weight.requires_grad = False
+        new_layer.weight.copy_(W.contiguous())
+        new_layer.weight.requires_grad = True
+        if layer.bias is not None:
+            new_layer.bias.requires_grad = False
+            new_layer.bias.copy_(b.contiguous())
+            new_layer.bias.requires_grad = True
+        return new_layer
+
+# Handle apply_chunking_to_forward import for different transformers versions
+try:
+    from transformers.modeling_utils import apply_chunking_to_forward
+except ImportError:
+    # For newer transformers versions where apply_chunking_to_forward was removed
+    def apply_chunking_to_forward(forward_fn, chunk_size, chunk_dim, *input_tensors):
+        """
+        Fallback implementation for apply_chunking_to_forward
+        This function was removed in newer transformers versions
+        """
+        import torch
+        
+        if chunk_size <= 0:
+            return forward_fn(*input_tensors)
+        
+        # Get the dimension to chunk along
+        assert len(input_tensors) > 0, "input_tensors cannot be empty"
+        tensor_shape = input_tensors[0].shape
+        
+        if chunk_dim >= len(tensor_shape):
+            return forward_fn(*input_tensors)
+            
+        # Split input tensors into chunks
+        input_chunks = []
+        for tensor in input_tensors:
+            chunks = torch.chunk(tensor, chunks=max(1, tensor.shape[chunk_dim] // chunk_size + (1 if tensor.shape[chunk_dim] % chunk_size != 0 else 0)), dim=chunk_dim)
+            input_chunks.append(chunks)
+        
+        # Process each chunk
+        output_chunks = []
+        for chunk_idx in range(len(input_chunks[0])):
+            chunk_inputs = [chunks[chunk_idx] for chunks in input_chunks]
+            chunk_output = forward_fn(*chunk_inputs)
+            output_chunks.append(chunk_output)
+        
+        # Concatenate outputs
+        if len(output_chunks) == 1:
+            return output_chunks[0]
+        else:
+            return torch.cat(output_chunks, dim=chunk_dim)
 from transformers.models.bert.configuration_bert import BertConfig
 from transformers.utils import logging
 from diffuvqa.utils.init_weights import init_weights

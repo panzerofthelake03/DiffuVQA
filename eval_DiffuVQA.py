@@ -2,11 +2,19 @@ import os, sys, glob, json
 import numpy as np
 import argparse
 import torch
+from datetime import datetime
 
 from torchmetrics.text.rouge import ROUGEScore
 
 rougeScore = ROUGEScore()
-from bert_score import score
+# Temporarily disable BERT Score due to PyTorch version compatibility issues
+HAS_BERT_SCORE = False
+try:
+    from bert_score import score
+    HAS_BERT_SCORE = True
+except Exception as e:
+    print(f"Warning: BERT Score disabled due to: {e}")
+    HAS_BERT_SCORE = False
 
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
@@ -38,11 +46,36 @@ from basic_utils import (
     args_to_dict,
     load_tokenizer
 )
+
+# Try to import enhanced metrics
+HAS_ENHANCED_METRICS = False
+try:
+    from enhanced_eval_metrics import EnhancedMetrics
+    HAS_ENHANCED_METRICS = True
+    print("Enhanced metrics loaded successfully!")
+except Exception as e:
+    print(f"Warning: Enhanced metrics not available: {e}")
+    HAS_ENHANCED_METRICS = False
+
+# Try to import Excel export module
+HAS_EXCEL_EXPORT = False
+try:
+    from excel_export_module import DiffuVQAExcelExporter
+    HAS_EXCEL_EXPORT = True
+    print("Excel export module loaded successfully!")
+except Exception as e:
+    print(f"Warning: Excel export not available: {e}")
+    HAS_EXCEL_EXPORT = False
 def create_argparser():
     defaults = dict()
     defaults.update(load_defaults_config())
     parser = argparse.ArgumentParser()
-    add_dict_to_argparser(parser, defaults) # update latest args according to argparse
+    parser.add_argument('--folder', type=str, default='config/ema_0.9999_300000.pt.samples', help='path to the folder of decoded texts')
+    parser.add_argument('--mbr', action='store_true', help='mbr decoding or not')
+    parser.add_argument('--sos', type=str, default='[CLS]', help='start token of the sentence')
+    parser.add_argument('--eos', type=str, default='[SEP]', help='end token of the sentence')
+    parser.add_argument('--sep', type=str, default='[SEP]', help='sep token of the sentence')
+    parser.add_argument('--pad', type=str, default='[PAD]', help='pad token of the sentence')
     return parser
 
 
@@ -158,7 +191,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    arg = create_argparser().parse_args()
+    # Create separate argparser for tokenizer loading with default values
+    arg_defaults = load_defaults_config()
+    class DefaultArgs:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+    
+    arg = DefaultArgs(**arg_defaults)
     tokenizer = load_tokenizer(arg)
 
     files = sorted(glob.glob(f"{args.folder}/*jsonl"))
@@ -239,9 +279,44 @@ if __name__ == '__main__':
 
             accuracy = acc / cnt
 
-            P, R, F1 = score(recovers, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=True)
+            # Calculate BERT Score only if available
+            bert_f1_score = 0.0
+            if HAS_BERT_SCORE:
+                try:
+                    P, R, F1 = score(recovers, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=True)
+                    bert_f1_score = torch.mean(F1).item()
+                except Exception as e:
+                    print(f"Warning: BERT Score calculation failed: {e}")
+                    bert_f1_score = 0.0
+            else:
+                print("Warning: BERT Score not available, skipping...")
+                
             precision, recall, f1_score = calculate_f1(references, recovers)
             CIDer =  cider_score(references, recovers)
+
+            # Calculate Enhanced Metrics if available
+            enhanced_results = {}
+            if HAS_ENHANCED_METRICS:
+                try:
+                    print("Calculating enhanced metrics...")
+                    enhanced_metrics = EnhancedMetrics()
+                    
+                    # Extract confidence scores if available
+                    confidences = []
+                    for recover in recovers:
+                        # Try to extract confidence from metadata if available
+                        # For now, use a default confidence
+                        confidences.append(0.8)  # Default confidence
+                    
+                    enhanced_results = enhanced_metrics.comprehensive_evaluate(
+                        recovers, references, confidences
+                    )
+                    print("Enhanced metrics calculated successfully!")
+                except Exception as e:
+                    print(f"Warning: Enhanced metrics calculation failed: {e}")
+                    enhanced_results = {}
+            else:
+                print("Enhanced metrics not available, skipping...")
 
             import json
 
@@ -250,25 +325,74 @@ if __name__ == '__main__':
             print('avg ROUGE-L score', np.mean(rougel))
             print('avg meteor score', np.mean(meteor))
             print('avg cider score', CIDer)
-            print('avg bert_score', torch.mean(F1))
+            print('avg bert_score', bert_f1_score)
             print('avg f1_score', f1_score)
             print('acc', accuracy)
             print('acc_YN',acc_yn/c_yn)
             print('acc_OE', acc_oe/c_oe)
+            
+            # Print enhanced metrics if available
+            if enhanced_results:
+                print('*' * 30)
+                print('ENHANCED METRICS')
+                print('*' * 30)
+                for metric_name, value in enhanced_results.items():
+                    if isinstance(value, (int, float)):
+                        print(f'{metric_name}: {value:.4f}')
+                    else:
+                        print(f'{metric_name}: {value}')
 
             results = {
+                # Original metrics
                 'avg_BLEU1_score': np.mean(bleu),
                 'avg_ROUGE_L_score': np.mean(rougel),
                 'avg_meteor_score': np.mean(meteor),
                 'avg_CIDer': CIDer,
-                'avg_bert_score': torch.mean(F1).item(),
+                'avg_bert_score': bert_f1_score,
                 'avg_f1_score': f1_score,
                 'acc': accuracy,
                 'acc_YN':acc_yn/c_yn,
                 'acc_OE': acc_oe/c_oe,
+                # Enhanced metrics
+                **enhanced_results
             }
             with open('ema_0.9999_300000.pt.samples.jsonl', 'w') as f:
                 json.dump(results, f, indent=4)
+            
+            # Export to Excel if available
+            if HAS_EXCEL_EXPORT:
+                try:
+                    print("Exporting results to Excel...")
+                    exporter = DiffuVQAExcelExporter()
+                    
+                    # Determine model and dataset names from folder path
+                    model_name = "DiffuVQA"
+                    dataset_name = "Medical_VQA"
+                    if "slake" in args.folder.lower():
+                        dataset_name = "SLAKE"
+                    elif "kvasir" in args.folder.lower():
+                        dataset_name = "Kvasir-VQA"
+                    elif "med" in args.folder.lower():
+                        dataset_name = "Med-VQA"
+                    
+                    # Additional info
+                    additional_info = {
+                        "Sample Folder": args.folder,
+                        "Total Samples": cnt,
+                        "Evaluation Date": str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                        "MBR Mode": args.mbr,
+                        "File Count": len(files)
+                    }
+                    
+                    excel_path = exporter.export_evaluation_results(
+                        results, model_name, dataset_name, additional_info
+                    )
+                    print(f"✅ Excel report saved to: {excel_path}")
+                    
+                except Exception as e:
+                    print(f"Warning: Excel export failed: {e}")
+            else:
+                print("Excel export not available, skipping...")
 
     if len(files) > 1:
         if not args.mbr:
@@ -313,10 +437,20 @@ if __name__ == '__main__':
 
             # print(len(recovers), len(references), len(recovers))
 
-            P, R, F1 = score(recovers, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=True)
+            # Calculate BERT Score for MBR if available
+            mbr_bert_score = torch.tensor(0.0)
+            if HAS_BERT_SCORE:
+                try:
+                    P, R, F1 = score(recovers, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=True)
+                    mbr_bert_score = torch.mean(F1)
+                except Exception as e:
+                    print(f"Warning: BERT Score calculation failed in MBR: {e}")
+                    mbr_bert_score = torch.tensor(0.0)
+            else:
+                print("Warning: BERT Score not available for MBR, skipping...")
 
             print('*' * 30)
             print('avg BLEU score', np.mean(bleu))
             print('avg ROUGE-l score', np.mean(rougel))
-            print('avg berscore', torch.mean(F1))
+            print('avg berscore', mbr_bert_score)
             print('avg dist1 score', np.mean(dist1))

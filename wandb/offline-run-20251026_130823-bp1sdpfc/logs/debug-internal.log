@@ -1,0 +1,12 @@
+{"time":"2025-10-26T13:08:26.4731318+03:00","level":"INFO","msg":"stream: starting","core version":"0.22.2"}
+{"time":"2025-10-26T13:08:27.6217173+03:00","level":"WARN","msg":"featurechecker: GraphQL client is nil, skipping feature loading"}
+{"time":"2025-10-26T13:08:27.6238815+03:00","level":"INFO","msg":"stream: created new stream","id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:27.624902+03:00","level":"INFO","msg":"handler: started","stream_id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:27.6635669+03:00","level":"INFO","msg":"stream: started","id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:27.6635669+03:00","level":"INFO","msg":"writer: started","stream_id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:27.6635669+03:00","level":"INFO","msg":"sender: started","stream_id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:27.6735026+03:00","level":"WARN","msg":"runupserter: server does not expand metric globs but the x_server_side_expand_glob_metrics setting is set; ignoring"}
+{"time":"2025-10-26T13:08:29.7872454+03:00","level":"INFO","msg":"stream: closing","id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:29.78775+03:00","level":"INFO","msg":"handler: closed","stream_id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:29.7883913+03:00","level":"INFO","msg":"sender: closed","stream_id":"bp1sdpfc"}
+{"time":"2025-10-26T13:08:29.7883913+03:00","level":"INFO","msg":"stream: closed","id":"bp1sdpfc"}

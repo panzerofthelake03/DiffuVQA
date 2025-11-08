@@ -20,6 +20,8 @@ scikit-learn
 psutil
 tqdm
 packaging
+pandas>=1.3.0                 # For Excel export functionality
+openpyxl>=3.0.0              # Excel file handling
 
 # Image
 Pillow
