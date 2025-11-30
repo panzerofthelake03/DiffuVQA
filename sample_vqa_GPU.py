@@ -17,6 +17,8 @@ from torchvision.transforms import transforms
 from transformers import set_seed
 from diffuvqa.rounding import denoised_fn_round, get_efficient_knn
 from diffuvqa.vqa_datasets import load_data_vqa
+from excel_export_module import record_sampling_data
+from datetime import datetime
 
 # from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
@@ -71,19 +73,43 @@ def main():
 
     args = create_argparser().parse_args()
 
+    # Debug: Print the parsed model_path
+    print(f"DEBUG: Parsed model_path = {args.model_path}")
+
     # Backwards-compatibility: some older training runs don't record newer flags.
     if not hasattr(args, 'use_noising_f'):
         args.use_noising_f = False
 
     logger.configure()
-
+    print("### Loading model from", args.model_path)
     # load configurations.
     config_path = os.path.join(os.path.split(args.model_path)[0], "training_args.json")
     print(config_path)
     with open(config_path, 'rb', ) as f:
         training_args = json.load(f)
+
+    original_model_path = args.model_path
+    original_batch_size = args.batch_size
+    original_Seed = args.seed
+    original_diffusion_step = args.step
+
     training_args['batch_size'] = args.batch_size
     args.__dict__.update(training_args)
+
+    
+    if(original_model_path != ""):
+        args.model_path = original_model_path
+    print("### Updated args:", args)
+
+    if(original_Seed is not None):
+        args.seed = original_Seed
+
+    if(original_batch_size is not None):
+        args.batch_size = original_batch_size
+
+    print(">>> diffusion_steps before:", original_diffusion_step)
+    if(original_diffusion_step is not None):
+        args.step = original_diffusion_step
 
     num_steps = args.diffusion_steps
 
@@ -156,12 +182,19 @@ def main():
     # Use a single `samples` folder under the provided out_dir and a concise filename.
     model_base_name = os.path.basename(os.path.split(args.model_path)[0]) + f'.{os.path.split(args.model_path)[1]}'
     # Use a short repo-root samples directory to avoid Windows MAX_PATH issues.
-    samples_dir = os.path.abspath(os.path.join(os.getcwd(), "samples"))
-    os.makedirs(samples_dir, exist_ok=True)
+    if(args.out_dir):
+        samples_dir = args.out_dir
+        os.makedirs(samples_dir, exist_ok=True)
+    else:
+        samples_dir = os.path.abspath(os.path.join(os.getcwd(), "samples"))
+        os.makedirs(samples_dir, exist_ok=True)
 
     # Create a compact filename: <model_folder>.<checkpoint>.seed<seed>_step<clamp>.jsonl
-    checkpoint_name = os.path.split(args.model_path)[1]
-    out_filename = f"{os.path.basename(os.path.split(args.model_path)[0])}.{checkpoint_name}.seed{args.seed}_step{args.clamp_step}.jsonl"
+    print("<<<<model_base_name:", model_base_name)
+    print("<<<<args.model_path:", args.model_path)
+    checkpoint_name = os.path.basename(args.model_path)  # Get the actual model file name
+    print("<<<<<checkpoint_name:", checkpoint_name)
+    out_filename = f"{checkpoint_name}.seed{args.seed}_step{args.clamp_step}_samplestep{args.step}_bsize{args.batch_size}.jsonl"
     # Truncate filename if it's excessively long to avoid Windows path length issues.
     if len(out_filename) > 200:
         out_filename = out_filename[:200]
@@ -317,6 +350,27 @@ def main():
         #         {"question": src, "reference_answer": ref, "generate_answer": recov}),
         #           file=fout)
         # fout.close()
+
+    # After sampling is completed, calculate total sample size and record parameters
+
+    total_samples = len(all_text_data)  # Calculate the total number of samples
+    sampling_duration = time.time() - start_t  # Calculate the total sampling duration
+
+    # Define the sampling parameters to record
+    sampling_parameters = {
+        "model_path": args.model_path,
+        "batch_size": args.batch_size,
+        "top_p": args.top_p,
+        "seed": args.seed,
+        "sampling_steps": args.step,
+        "total_samples": total_samples,
+        "sampling_duration_in_seconds": sampling_duration  # Record the duration
+    }
+
+    # Record the sampling data in the Excel file
+    record_sampling_data(sampling_parameters, output_dir="reports")
+
+    print(f"### Recorded sampling data: {sampling_parameters}")
 
     print('### Total takes {:.2f}s .....'.format(time.time() - start_t))
     print(f'### Written the decoded output to {out_path}')

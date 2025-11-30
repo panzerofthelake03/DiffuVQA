@@ -3,8 +3,10 @@ import numpy as np
 import argparse
 import torch
 from datetime import datetime
+from collections import defaultdict
 
 from torchmetrics.text.rouge import ROUGEScore
+from excel_export_module import record_evaluation_data
 
 rougeScore = ROUGEScore()
 # Temporarily disable BERT Score due to PyTorch version compatibility issues
@@ -183,6 +185,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='decoding args.')
     parser.add_argument('--folder', type=str, default='config/ema_0.9999_300000.pt.samples', help='path to the folder of decoded texts')
+    parser.add_argument('--filename', type=str, default='', help='path to a single decoded text file')
     parser.add_argument('--mbr', action='store_true', help='mbr decoding or not')
     parser.add_argument('--sos', type=str, default='[CLS]', help='start token of the sentence')
     parser.add_argument('--eos', type=str, default='[SEP]', help='end token of the sentence')
@@ -201,16 +204,23 @@ if __name__ == '__main__':
     arg = DefaultArgs(**arg_defaults)
     tokenizer = load_tokenizer(arg)
 
-    files = sorted(glob.glob(f"{args.folder}/*jsonl"))
+    if args.filename:
+        # If a single file is specified, use it directly
+        files = [ args.folder + "\\" + args.filename]
+    else:
+        # Otherwise, use all files in the folder
+        files = sorted(glob.glob(f"{args.folder}/*jsonl"))
+        print(files)
+
     print(args.folder)
     sample_num = 0
     with open(files[0], 'r') as f:
         for row in f:
             sample_num += 1
 
-    sentenceDict = {}
-    referenceDict = {}
-    sourceDict = {}
+    sentenceDict = defaultdict(list)
+    referenceDict = defaultdict(list)
+    sourceDict = defaultdict(list)
     for i in range(sample_num):
         sentenceDict[i] = []
         referenceDict[i] = []
@@ -232,7 +242,7 @@ if __name__ == '__main__':
         dist1 = []
        
 
-
+    total_samples = 0
     with open(path, 'r') as f:
             acc = 0.
             acc_oe = 0.
@@ -276,7 +286,8 @@ if __name__ == '__main__':
                 referenceDict[cnt].append(reference)
                 sourceDict[cnt].append(source)
                 cnt += 1
-
+            
+            total_samples += cnt
             accuracy = acc / cnt
 
             # Calculate BERT Score only if available
@@ -378,7 +389,7 @@ if __name__ == '__main__':
                     # Additional info
                     additional_info = {
                         "Sample Folder": args.folder,
-                        "Total Samples": cnt,
+                        "Total Samples": total_samples,
                         "Evaluation Date": str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
                         "MBR Mode": args.mbr,
                         "File Count": len(files)
@@ -454,3 +465,64 @@ if __name__ == '__main__':
             print('avg ROUGE-l score', np.mean(rougel))
             print('avg berscore', mbr_bert_score)
             print('avg dist1 score', np.mean(dist1))
+
+    def evaluate(files, bert_model='microsoft/deberta-xlarge-mnli'):
+        stats = defaultdict(list)
+        for path in files:
+            for row in load_jsonl(path):
+                q = (row.get('question', '') or row.get('source', '')).strip()
+                # reference can be under several names
+                ref = (row.get('reference_answer') or row.get('reference') or row.get('answer') or row.get('ground_truth') or '').strip()
+                # generated text under common fields
+                gen = (row.get('generate_answer') or row.get('generated_answer') or row.get('prediction') or row.get('generated') or row.get('recover') or '').strip()
+
+                stats['questions'].append(q)
+                stats['refs'].append(ref)
+                stats['gens'].append(gen)
+
+        refs = stats['refs']
+        gens = stats['gens']
+
+        n = len(refs)
+        if n == 0:
+            return {}
+
+        exact = [exact_match(g, r) for g, r in zip(gens, refs)]
+        bleu1_scores = [bleu1(g, r) for g, r in zip(gens, refs)]
+        rougeL_scores = [rouge_l_score(g, r) for g, r in zip(gens, refs)]
+        # METEOR expects pre-tokenized inputs (iterable of tokens). Tokenize safely.
+        meteor_scores = []
+        for g, r in zip(gens, refs):
+            if len(g.strip()) == 0 or len(r.strip()) == 0:
+                meteor_scores.append(0.0)
+                continue
+            try:
+                # nltk.translate.meteor_score.meteor_score requires tokenized inputs
+                meteor_scores.append(meteor_score([word_tokenize(r)], word_tokenize(g)))
+            except Exception:
+                meteor_scores.append(0.0)
+
+        # CIDEr-like
+        cider = cider_score(gens, refs)
+
+        # BERTScore (may be slower) - returns P,R,F1 arrays
+        try:
+            P, R, F1 = bert_score(gens, refs, model_type=bert_model, lang='en', verbose=False)
+            bert_f1 = float(np.mean(F1.tolist()))
+        except Exception:
+            bert_f1 = 0.0
+
+        out = {
+            'samples': n,
+            'exact_match': float(np.mean(exact)),
+            'bleu1': float(np.mean(bleu1_scores)),
+            'rougeL': float(np.mean(rougeL_scores)),
+            'meteor': float(np.mean(meteor_scores)),
+            'cider_like': float(cider),
+            'bert_score_f1': float(bert_f1),
+        }
+
+        # Record evaluation results in an Excel file
+        record_evaluation_data(out, output_dir="", dataset_name="Slake", model_name="DiffuVQA")
+
+        return out

@@ -29,7 +29,7 @@ class DiffuVQAExcelExporter:
                                  dataset_name: str = "Unknown",
                                  additional_info: Dict[str, Any] = None) -> str:
         """
-        Export evaluation results to Excel file
+        Export evaluation results to Excel file incrementally, with optional additional information.
         
         Args:
             results: Dictionary containing evaluation metrics
@@ -38,64 +38,118 @@ class DiffuVQAExcelExporter:
             additional_info: Additional information to include
             
         Returns:
-            Path to the generated Excel file
+            Path to the updated Excel file
         """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{model_name}_{dataset_name}_evaluation_{timestamp}.xlsx"
-        filepath = os.path.join(self.output_dir, filename)
-        
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            # Sheet 1: Summary Metrics
-            self._create_summary_sheet(writer, results, model_name, dataset_name, additional_info)
-            
-            # Sheet 2: Detailed Metrics
-            self._create_detailed_metrics_sheet(writer, results)
-            
-            # Sheet 3: Answer Type Analysis
-            self._create_answer_type_sheet(writer, results)
-            
-            # Sheet 4: Enhanced Metrics (if available)
-            if self._has_enhanced_metrics(results):
-                self._create_enhanced_metrics_sheet(writer, results)
-                
-        print(f"✅ Evaluation results exported to: {filepath}")
-        return filepath
+        # Ensure the output directory exists
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Define the path to the Excel file
+        excel_file = os.path.join(self.output_dir, "evaluation_records.xlsx")
+
+        # Check if the file exists
+        if os.path.exists(excel_file):
+            # Load the existing Excel file
+            existing_df = pd.read_excel(excel_file)
+        else:
+            # Create an empty DataFrame with predefined columns
+            existing_df = pd.DataFrame(columns=[
+                "model_name", "dataset_name", "export_date", "overall_accuracy", 
+                "yes_no_accuracy", "open_ended_accuracy", "bleu_1_score", 
+                "rouge_l_score", "meteor_score", "cider_score", "bert_score", "f1_score",
+                "additional_info"
+            ])
+
+        # Create a new DataFrame for the current evaluation results
+        new_data = pd.DataFrame([{
+            "model_name": model_name,
+            "dataset_name": dataset_name,
+            "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "overall_accuracy": results.get("acc", "N/A"),
+            "yes_no_accuracy": results.get("acc_YN", "N/A"),
+            "open_ended_accuracy": results.get("acc_OE", "N/A"),
+            "bleu_1_score": results.get("avg_BLEU1_score", "N/A"),
+            "rouge_l_score": results.get("avg_ROUGE_L_score", "N/A"),
+            "meteor_score": results.get("avg_meteor_score", "N/A"),
+            "cider_score": results.get("avg_CIDer", "N/A"),
+            "bert_score": results.get("avg_bert_score", "N/A"),
+            "f1_score": results.get("avg_f1_score", "N/A"),
+            "Sample Folder": additional_info.get("Sample Folder", "N/A") if additional_info else "N/A",
+            "Total Samples": additional_info.get("Total Samples", "N/A") if additional_info else "N/A",
+            "Evaluation Date": additional_info.get("Evaluation Date", "N/A") if additional_info else "N/A",
+            "File Count": additional_info.get("File Count", "N/A") if additional_info else "N/A"
+        }])
+
+        # Append the new data to the existing DataFrame
+        updated_df = pd.concat([existing_df, new_data], ignore_index=True)
+
+        # Save the updated DataFrame back to the Excel file
+        updated_df.to_excel(excel_file, index=False)
+
+        print(f"✅ Evaluation data recorded in {excel_file}")
+        return excel_file
     
     def export_training_logs(self, 
                            log_dir: str,
                            model_name: str = "DiffuVQA",
-                           include_wandb: bool = True) -> str:
+                           include_wandb: bool = True,
+                           lr: float = 0.0,
+                           batch_size: int = 0,
+                           total_training_time: float = 0.0,
+                           avg_time_per_step: float = 0.0,
+                           total_learning_steps: int = 0,
+                           hardware_info: str = "Unknown") -> str:
         """
-        Export training logs to Excel file
+        Export training logs to Excel file incrementally, with additional information.
         
         Args:
             log_dir: Directory containing training logs
             model_name: Name of the model
             include_wandb: Whether to include wandb logs
+            total_training_time: Total time taken to train the model (in seconds)
+            avg_time_per_step: Average time per training step (in seconds)
+            hardware_info: Information about the hardware used for training
             
         Returns:
-            Path to the generated Excel file
+            Path to the updated Excel file
         """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{model_name}_training_logs_{timestamp}.xlsx"
-        filepath = os.path.join(self.output_dir, filename)
-        
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            # Sheet 1: Training Summary
-            self._create_training_summary_sheet(writer, log_dir, model_name)
-            
-            # Sheet 2: Loss Curves
-            if include_wandb:
-                self._create_loss_curves_sheet(writer, log_dir)
-            
-            # Sheet 3: Hyperparameters
-            self._create_hyperparameters_sheet(writer, log_dir)
-            
-            # Sheet 4: Model Checkpoints
-            self._create_checkpoints_sheet(writer, log_dir)
-                
-        print(f"✅ Training logs exported to: {filepath}")
-        return filepath
+        # Ensure the output directory exists
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Define the path to the Excel file
+        excel_file = os.path.join(self.output_dir, "training_logs.xlsx")
+
+        # Check if the file exists
+        if os.path.exists(excel_file):
+            # Load the existing Excel file
+            existing_df = pd.read_excel(excel_file)
+        else:
+            # Create an empty DataFrame with predefined columns
+            existing_df = pd.DataFrame(columns=[
+                "model_name", "log_dir", "export_date", "total_training_time", 
+                "avg_time_per_step", "total_learning_steps" ,"hardware_info"
+            ])
+
+        # Create a new DataFrame for the current training log
+        new_data = pd.DataFrame([{
+            "model_name": model_name,
+            "lr": lr,
+            "batch_size": batch_size,
+            "log_dir": log_dir,
+            "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_training_time": total_training_time,
+            "avg_time_per_step": avg_time_per_step,
+            "total_learning_steps": total_learning_steps,
+            "hardware_info": hardware_info
+        }])
+
+        # Append the new data to the existing DataFrame
+        updated_df = pd.concat([existing_df, new_data], ignore_index=True)
+
+        # Save the updated DataFrame back to the Excel file
+        updated_df.to_excel(excel_file, index=False)
+
+        print(f"✅ Training logs recorded in {excel_file}")
+        return excel_file
     
     def export_comprehensive_report(self,
                                   evaluation_results: Dict[str, Any],
@@ -544,6 +598,86 @@ def export_training_logs_to_excel(log_directory: str,
     """
     exporter = DiffuVQAExcelExporter(output_dir)
     return exporter.export_training_logs(log_directory, model_name)
+
+
+def record_sampling_data(sampling_parameters, output_dir="reports"):
+    """
+    Records the sampling parameters, total sample size, and duration into an Excel file.
+
+    Args:
+        sampling_parameters (dict): A dictionary containing sampling parameters, total sample size, and duration.
+        output_dir (str): Directory to save the Excel file.
+    """
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Define the path to the Excel file
+    excel_file = os.path.join(output_dir, "sampling_records.xlsx")
+
+    # Check if the file exists
+    if os.path.exists(excel_file):
+        # Load the existing Excel file
+        df = pd.read_excel(excel_file)
+    else:
+        # Create a new DataFrame if the file does not exist
+        df = pd.DataFrame(columns=["model_path", "batch_size", "top_p", "seed", "sampling_steps", "total_samples", "sampling_duration_in_seconds"])
+
+    # Append the new sampling data
+    df = pd.concat([df, pd.DataFrame([sampling_parameters])], ignore_index=True)
+
+    # Save the updated DataFrame back to the Excel file
+    df.to_excel(excel_file, index=False)
+
+    print(f"Sampling data recorded in {excel_file}")
+
+
+def record_evaluation_data(evaluation_results: Dict[str, Any], model_name: str, dataset_name: str, output_dir: str = ""):
+    """
+    Records the evaluation results into an Excel file incrementally, using a fixed column structure.
+
+    Args:
+        evaluation_results (dict): A dictionary containing evaluation metrics.
+        model_name (str): Name of the model being evaluated.
+        dataset_name (str): Name of the dataset used for evaluation.
+        output_dir (str): Directory to save the Excel file.
+    """
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Define the path to the Excel file
+    excel_file = os.path.join(output_dir, "evaluation_records.xlsx")
+
+    if os.path.exists(excel_file):
+        # Load the existing Excel file
+        df = pd.read_excel(excel_file)
+    else:
+        # Create a new DataFrame if the file does not exist
+        df = pd.DataFrame(columns = [
+        "Model Name", "Dataset", "Export Date", "Overall Accuracy", "Yes/No Accuracy",
+        "Open-Ended Accuracy", "BLEU-1 Score", "ROUGE-L Score", "METEOR Score",
+        "CIDEr Score", "BERT Score", "F1 Score"
+    ])
+    
+    # Create a new DataFrame for the current evaluation results
+    df = pd.concat([df, pd.DataFrame({
+        "model_name": model_name,
+        "dataset_name": dataset_name,
+        "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "overall_accuracy": evaluation_results.get("acc", "N/A"),
+        "yes_no_accuracy": evaluation_results.get("acc_YN", "N/A"),
+        "open_ended_accuracy": evaluation_results.get("acc_OE", "N/A"),
+        "bleu_1_score": evaluation_results.get("avg_BLEU1_score", "N/A"),
+        "rouge_l_score": evaluation_results.get("avg_ROUGE_L_score", "N/A"),
+        "meteor_score": evaluation_results.get("avg_meteor_score", "N/A"),
+        "cider_score": evaluation_results.get("avg_CIDer", "N/A"),
+        "bert_score": evaluation_results.get("avg_bert_score", "N/A"),
+        "f1_score": evaluation_results.get("avg_f1_score", "N/A")
+    })], ignore_index=True)
+
+    # Save the updated DataFrame back to the Excel file
+    df.to_excel(excel_file, index=False)
+
+    print(f"Evaluation data recorded in {excel_file}")
 
 
 if __name__ == "__main__":

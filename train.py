@@ -3,7 +3,7 @@ Train a diffusion model on images.
 """
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-
+import time
 import argparse
 import torch.nn as nn
 import json, torch, os
@@ -26,6 +26,7 @@ import wandb
 import sys
 import os
 from torchvision import transforms
+from excel_export_module import DiffuVQAExcelExporter
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,11 +46,12 @@ def create_argparser():
 
 def main():
     args = create_argparser().parse_args()
-    set_seed(args.seed) 
+    set_seed(args.seed)
+    
     # dist_util.setup_dist()
     logger.configure()
     logger.log("### Creating data loader...")
-
+    start_t = time.time()
     tokenizer = load_tokenizer(args)
     model_weight, tokenizer = load_model_emb(args, tokenizer)
     transform = transforms.Compose([
@@ -121,6 +123,26 @@ def main():
         eval_data=data_valid,
         eval_interval=args.eval_interval
     ).run_loop(args)
+
+    # Calculate total training time and average time per step
+    total_training_time =  time.time() - start_t  # Replace with actual calculation
+    avg_time_per_step = total_training_time / args.learning_steps if args.learning_steps > 0 else 0
+
+    # Gather hardware information
+    hardware_info = f"GPUs: {torch.cuda.device_count()}, CUDA Version: {torch.version.cuda}, PyTorch Version: {torch.__version__}"
+
+    # Export training logs
+    exporter = DiffuVQAExcelExporter()
+    exporter.export_training_logs(
+        log_dir=args.checkpoint_path,
+        model_name="DiffuVQA",
+        lr=args.lr,
+        batch_size=args.batch_size,
+        total_training_time=total_training_time,
+        avg_time_per_step=avg_time_per_step,
+        total_learning_steps=args.learning_steps,
+        hardware_info=hardware_info
+    )
 
 if __name__ == "__main__":
     main()
