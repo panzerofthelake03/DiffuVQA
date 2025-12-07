@@ -353,7 +353,7 @@ def main():
 
     # After sampling is completed, calculate total sample size and record parameters
 
-    total_samples = len(all_text_data)  # Calculate the total number of samples
+    total_samples = len(all_text_data) * args.batch_size # Calculate the total number of samples
     sampling_duration = time.time() - start_t  # Calculate the total sampling duration
 
     # Define the sampling parameters to record

@@ -1,4 +1,5 @@
 # import blobfile as bf
+from diffuvqa.utils import logger
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
@@ -41,7 +42,7 @@ def load_data_vqa(
     
        """
 
-    print('#'*30, '\nLoading text data...')
+    logger.log('#' * 30 + '\nLoading text data...')
 
     data, data_lst = get_corpus(args, seq_len, split=split, loaded_vocab=loaded_vocab)
 
@@ -84,12 +85,12 @@ def infinite_loader(data_loader):
 
 def helper_tokenize(sentence_lst, vocab_dict, seq_len, split):
     # Process.memory_info is expressed in bytes, so convert to megabytes
-    print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    logger.log(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
     # sentence_lst is a dict of lists, e.g. {'question': [...], 'answer': [...]}
     # Implement single-process chunked tokenization to avoid multiprocessing
     # spawn issues on Windows and to make behavior deterministic.
     n = len(sentence_lst['question'])
-    print(f"Dataset size: {n}")
+    logger.log(f"Dataset size: {n}")
 
     input_id_q = []
     input_id_a = []
@@ -108,7 +109,7 @@ def helper_tokenize(sentence_lst, vocab_dict, seq_len, split):
         input_id_q.extend(tq['input_ids'])
         input_id_a.extend(ta['input_ids'])
 
-        print(f"Tokenized {end} / {n} -- RAM: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+        logger.log(f"Tokenized {end} / {n} -- RAM: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
 
     # Merge question and answer ids and create the mask (0 for question, 1 for answer)
     input_ids = [q + a for q, a in zip(input_id_q, input_id_a)]
@@ -124,13 +125,13 @@ def helper_tokenize(sentence_lst, vocab_dict, seq_len, split):
     tokenized_datasets = Dataset2.from_dict(tokenized_group)
     raw_datasets = datasets.DatasetDict()
     raw_datasets[split] = tokenized_datasets
-    print(f"Finished tokenization. RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    logger.log(f"Finished tokenization. RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
     return raw_datasets
 
 
 def get_corpus(args, seq_len, split, loaded_vocab=None):
     
-    print('#'*30, '\nLoading dataset {} from {}...'.format(args.dataset, args.data_dir))
+    logger.log('#' * 30 + f"\nLoading dataset {args.dataset} from {args.data_dir}...")
 
     if args.dataset == 'ImageCLEFmed-MEDVQA-GI-2023-Development-Dataset' or args.dataset == 'Kvasir_VQA' or args.dataset == "pvqa" or args.dataset=="VQAMED2019":
         data_lst = {'question':[], 'answer': [], 'image_name': []}
@@ -138,20 +139,22 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
         data_lst = {'question':[], 'answer': [], 'image_name': [], 'qid': [], 'img_id': []}
 
     if split == 'train':
-        print('### Loading from the TRAIN set...')
+        logger.log('### Loading from the TRAIN set...')
         path = f'{args.data_dir}/train.jsonl'
     elif split == 'valid':
-        print('### Loading from the VALID set...')
+        logger.log('### Loading from the VALID set...')
         path = f'{args.data_dir}/valid.jsonl'
     elif split == 'test':
-        print('### Loading from the TEST set...')
+        logger.log('### Loading from the TEST set...')
         path = f'{args.data_dir}/test.jsonl'
     else:
         assert False, "invalid split for dataset"
 
     # Open files using utf-8 and replace invalid bytes to avoid UnicodeDecodeError
     with open(path, 'rb') as f_reader:
+        line_num = 0
         for raw_line in f_reader:
+            line_num += 1
             # decode using utf-8 with replacement for invalid bytes
             try:
                 line = raw_line.decode('utf-8')
@@ -176,25 +179,43 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
                         else:
                             data_lst[key].append(content[key])
             else:
-                for key in ['question', 'answer', 'qid', 'img_id']:
-                    if key in content:
-                        if isinstance(content[key], str):
-                            data_lst[key].append(content[key].strip())
-                        else:
-                            data_lst[key].append(content[key])
-                # Handle img_name field from dataset and map to image_name
-                if 'img_name' in content:
-                    if isinstance(content['img_name'], str):
-                        data_lst['image_name'].append(content['img_name'].strip())
-                    else:
-                        data_lst['image_name'].append(content['img_name'])
-                elif 'image_name' in content:
-                    if isinstance(content['image_name'], str):
-                        data_lst['image_name'].append(content['image_name'].strip())
-                    else:
-                        data_lst['image_name'].append(content['image_name'])
+                # Extract expected keys robustly. Avoid spurious warnings when
+                # the key exists but the value type is not a string (e.g. ints
+                # for 'qid' or 'img_id'). If a key is missing, log it once and
+                # append a sensible default to keep alignment.
+                expected_keys = ['question', 'answer', 'qid', 'img_id']
 
-    print('### Data samples...\n', data_lst['question'][:2], data_lst['answer'][:2], data_lst['image_name'][:2])
+                if not isinstance(content, dict):
+                    logger.log(f"Warning: record is not a dict (file {path}, line {line_num}), skipping. Record type: {type(content)}")
+                    continue
+
+                for key in expected_keys:
+                    if key in content:
+                        # Append stripped string values; non-strings (ints) are appended as-is.
+                        val = content[key]
+                        if isinstance(val, str):
+                            data_lst[key].append(val.strip())
+                        else:
+                            data_lst[key].append(val)
+                    else:
+                        # Missing key: append a default value and count it for a brief summary.
+                        default = -1 if key in ('qid', 'img_id') else ''
+                        data_lst[key].append(default)
+                        # record a lightweight warning (no heavy per-record logging)
+                        logger.log(f"Warning: missing key '{key}' in record (file {path}, line {line_num}).")
+
+                # Handle img_name / image_name mapping
+                if 'img_name' in content:
+                    img_val = content['img_name']
+                    data_lst['image_name'].append(img_val.strip() if isinstance(img_val, str) else img_val)
+                elif 'image_name' in content:
+                    img_val = content['image_name']
+                    data_lst['image_name'].append(img_val.strip() if isinstance(img_val, str) else img_val)
+                else:
+                    data_lst['image_name'].append('')
+
+    logger.log('### Data samples...')
+    logger.log(f"questions: {data_lst['question'][:2]} answers: {data_lst['answer'][:2]} images: {data_lst['image_name'][:2]}")
 
     # Ensure all lists in data_lst have the same length by padding missing entries.
     # This avoids pyarrow/datasets errors if some records lack optional fields like image_name.

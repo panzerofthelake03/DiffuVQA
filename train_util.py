@@ -10,7 +10,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 import io
 import torch 
-
+from tqdm.auto import tqdm
 from diffuvqa.utils import dist_util, logger
 from diffuvqa.utils.fp16_util import (
     make_master_params,
@@ -76,6 +76,8 @@ class TrainLoop:
         self.resume_step = 0
         self.global_batch = self.batch_size
 
+        self.last_loss = None
+
         self.model_params = list(self.model.parameters())
         self.master_params = self.model_params
         self.lg_loss_scale = INITIAL_LOG_LOSS_SCALE
@@ -105,7 +107,7 @@ class TrainLoop:
 
         if th.cuda.is_available():  # DEBUG **
             self.use_ddp = True
-            print(dist_util.dev())
+            logger.log(f"Device: {dist_util.dev()}")
 
             self.ddp_model = self.model
         else:
@@ -176,30 +178,52 @@ class TrainLoop:
         # expects (not the number of epochs). We iterate through the dataset
         # and stop once the requested number of steps is reached.
         data_iter = iter(self.data)
-        from tqdm import tqdm
-        while (not self.learning_steps) or (self.step < self.learning_steps):
-            try:
-                image, cond = next(data_iter)
-            except StopIteration:
-                # Recreate the iterator when the dataset is exhausted
-                data_iter = iter(self.data)
-                image, cond = next(data_iter)
+        total = self.learning_steps if self.learning_steps else None
+        with tqdm(total=total, initial=self.step, desc="Training", unit="step") as pbar:
+            # expose pbar to other methods if needed
+            self.pbar = pbar
+            while (not self.learning_steps) or (self.step < self.learning_steps):
+                try:
+                    image, cond = next(data_iter)
+                except StopIteration:
+                    # Recreate the iterator when the dataset is exhausted
+                    data_iter = iter(self.data)
+                    image, cond = next(data_iter)
+                try:
+                    self.run_step(image, cond)
+                except Exception:
+                    # ensure progressbar closes on exception, then re-raise
+                    pbar.close()
+                    raise
 
-            self.run_step(image, cond)
-            if self.step % self.log_interval == 0:
-                logger.dumpkvs()
-            if self.eval_data is not None and self.step % self.eval_interval == 0:
-                batch_eval, cond_eval = next(self.eval_data)
-                self.forward_only(batch_eval, cond_eval)
-                print('eval on validation set')
-                logger.dumpkvs()
-            if self.step > 0 and self.step % self.save_interval == 0:
-                self.save()
-                # Run for a finite amount of time in integration tests.
-                if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
-                    return
-            self.step += 1
-            print(f'Step: {self.step}')
+                # periodic logging (existing behaviour)
+                if self.step % self.log_interval == 0:
+                    logger.dumpkvs()
+                if self.eval_data is not None and self.step % self.eval_interval == 0:
+                    batch_eval, cond_eval = next(self.eval_data)
+                    self.forward_only(batch_eval, cond_eval)
+                    logger.dumpkvs()
+                if self.step > 0 and self.step % self.save_interval == 0:
+                    self.save()
+                    if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
+                        pbar.close()
+                        return
+
+                # update step counter and progressbar
+                self.step += 1
+                pbar.update(1)
+                # set postfix with latest loss and lr if available
+                postfix = {}
+                if self.last_loss is not None:
+                    postfix["loss"] = f"{self.last_loss:.4f}"
+                try:
+                    postfix["lr"] = f"{self.opt.param_groups[0]['lr']:.3e}"
+                except Exception:
+                    pass
+                # Avoid forcing a full refresh each step to keep output stable.
+                pbar.set_postfix(postfix, refresh=False)
+            # clear pbar reference when done
+            self.pbar = None
         # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:
             self.save()
@@ -213,7 +237,6 @@ class TrainLoop:
         self.log_step()
 
     def forward_only(self, image, cond):
-        print(self.batch_size)
         with th.no_grad():
             zero_grad(self.model_params)
             for i in range(0, image.shape[0], self.microbatch):
@@ -249,10 +272,12 @@ class TrainLoop:
                 #     with self.ddp_model.no_sync():
                 #         losses = compute_losses()
                 loss = (losses["loss"] * weights).mean()
+                self.last_loss = float(loss.detach().item())
                 log_loss_dict(
                     self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()}
                 )
-                print("eval loss:", loss.detach())
+                # Avoid printing directly to stdout; use logger (dumped at log_interval) and last_loss for tqdm postfix.
+                logger.logkv_mean("eval_loss", float(loss.detach().item()))
 
     def forward_backward(self, image, cond):
         zero_grad(self.model_params)
@@ -283,6 +308,7 @@ class TrainLoop:
             )
 
         loss = (losses["loss"] * weights).mean()
+        self.last_loss = float(loss.detach().item())
         log_loss_dict(
             self.diffusion, t, {k: v * weights for k, v in losses.items()}
         )
@@ -291,7 +317,6 @@ class TrainLoop:
             (loss * loss_scale).backward()
         else:
             loss.backward()
-        print("loss", loss.detach())
 
     def optimize_fp16(self):
         if any(not th.isfinite(p.grad).all() for p in self.model_params):
@@ -372,8 +397,8 @@ class TrainLoop:
                 filename = f"model{(self.step + self.resume_step):06d}.pt"
             else:
                 filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
-            print('writing to', bf.join(get_blob_logdir(), filename))
-            print('writing to', bf.join(self.checkpoint_path, filename))
+            logger.log(f"writing to {bf.join(get_blob_logdir(), filename)}")
+            logger.log(f"writing to {bf.join(self.checkpoint_path, filename)}")
             # with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
             #     th.save(state_dict, f)
             with bf.BlobFile(bf.join(self.checkpoint_path, filename), "wb") as f:  # DEBUG **

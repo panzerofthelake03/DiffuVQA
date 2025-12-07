@@ -69,16 +69,16 @@ def main():
         data_valid = None
 
 
-    print('#'*30, 'size of vocab', args.vocab_size)
+    logger.log(f"{'#'*30} size of vocab {args.vocab_size}")
 
     logger.log("### Creating model and diffusion...")
-    print("use{}".format(args.model))
+    logger.log(f"use{args.model}")
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
     model, diffusion = create_model_and_diffusion(args=args)
     # print('#'*30, 'cuda', dist_util.dev())
 
     if torch.cuda.device_count() > 1:
-        print(f"Let's use {torch.cuda.device_count()} GPUs!")
+        logger.log(f"Using {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
 
     model.to(dist_util.dev()) #  DEBUG **
