@@ -52,7 +52,7 @@ def load_data_vqa(
         # sampler = DistributedSampler(dataset)
         # On Windows, using multiple DataLoader workers can trigger multiprocessing
         # spawn issues. Use a single process there.
-        dw = 0 if os.name == 'nt' else 4
+        dw = 0 if os.name == 'nt' else 2
         data_loader = DataLoader(
             dataset,
             batch_size=batch_size,  # 20,
@@ -62,7 +62,7 @@ def load_data_vqa(
             num_workers=dw,
         )
     else:
-        dw = 0 if os.name == 'nt' else 4
+        dw = 0 if os.name == 'nt' else 2
         data_loader = DataLoader(
             dataset,
             batch_size=batch_size,  # 20,
@@ -137,6 +137,114 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
         data_lst = {'question':[], 'answer': [], 'image_name': []}
     else:
         data_lst = {'question':[], 'answer': [], 'image_name': [], 'qid': [], 'img_id': []}
+
+    # Handle DaveKevin/MedVQA dataset from HuggingFace (case-insensitive)
+    if args.dataset.lower() == 'davekevin':
+        logger.log('### Loading DaveKevin/MedVQA dataset from HuggingFace...')
+        from datasets import load_dataset
+        import os
+        
+        # Use HuggingFace token if available
+        hf_token = os.environ.get('HF_TOKEN', None)
+        if hf_token:
+            logger.log('### Using HuggingFace authentication token')
+        
+        # Load the full dataset with caching enabled
+        try:
+            hf_dataset = load_dataset(
+                "DaveKevin/MedVQA", 
+                split="train",
+                token=hf_token,
+                cache_dir=os.path.join(args.data_dir, '.hf_cache')
+            )
+        except Exception as e:
+            logger.log(f'### Error loading from HuggingFace: {e}')
+            logger.log('### Tip: Set HF_TOKEN environment variable or login with: huggingface-cli login')
+            raise
+        
+        # Calculate split indices (80% train, 10% valid, 10% test)
+        total_size = len(hf_dataset)
+        train_size = int(0.8 * total_size)
+        valid_size = int(0.1 * total_size)
+        
+        if split == 'train':
+            logger.log(f'### Using samples 0-{train_size} for TRAIN set...')
+            dataset_split = hf_dataset.select(range(0, train_size))
+        elif split == 'valid':
+            logger.log(f'### Using samples {train_size}-{train_size + valid_size} for VALID set...')
+            dataset_split = hf_dataset.select(range(train_size, train_size + valid_size))
+        elif split == 'test':
+            logger.log(f'### Using samples {train_size + valid_size}-{total_size} for TEST set...')
+            dataset_split = hf_dataset.select(range(train_size + valid_size, total_size))
+        else:
+            assert False, "invalid split for dataset"
+        
+        # Create image directory if it doesn't exist
+        image_save_dir = os.path.join(args.data_dir, 'daveKevin_images', split)
+        os.makedirs(image_save_dir, exist_ok=True)
+        
+        # Check if images are already cached locally
+        first_image = f'medvqa_{split}_000000.png'
+        if os.path.exists(os.path.join(image_save_dir, first_image)):
+            logger.log(f'### Found cached images in {image_save_dir}, skipping download...')
+        
+        # Process each sample
+        logger.log(f'### Processing {len(dataset_split)} samples from DaveKevin/MedVQA...')
+        for idx, sample in enumerate(dataset_split):
+            # Save image locally
+            image_filename = f'medvqa_{split}_{idx:06d}.png'
+            image_path = os.path.join(image_save_dir, image_filename)
+            
+            if not os.path.exists(image_path):
+                try:
+                    img = sample['image'].convert('RGB')
+                    img.save(image_path)
+                except Exception as e:
+                    logger.log(f"Warning: Failed to save image {idx}: {e}")
+                    # Create a placeholder black image
+                    placeholder = Image.new('RGB', (224, 224), (0, 0, 0))
+                    placeholder.save(image_path)
+            
+            # Add to data_lst
+            data_lst['question'].append(sample['question'].strip())
+            data_lst['answer'].append(sample['answer'].strip())
+            data_lst['image_name'].append(os.path.join(split, image_filename))
+            
+            if idx % 500 == 0:
+                logger.log(f'### Processed {idx}/{len(dataset_split)} samples...')
+        
+        logger.log(f'### Finished processing DaveKevin/MedVQA {split} set')
+        logger.log('### Data samples...')
+        logger.log(f"questions: {data_lst['question'][:2]} answers: {data_lst['answer'][:2]} images: {data_lst['image_name'][:2]}")
+        
+        # Plot first few images with questions and answers
+        try:
+            import matplotlib.pyplot as plt
+            num_samples_to_plot = min(3, len(dataset_split))
+            fig, axes = plt.subplots(1, num_samples_to_plot, figsize=(15, 5))
+            if num_samples_to_plot == 1:
+                axes = [axes]
+            
+            for i in range(num_samples_to_plot):
+                img_path = os.path.join(image_save_dir, f'medvqa_{split}_{i:06d}.png')
+                img = Image.open(img_path).convert('RGB')
+                
+                axes[i].imshow(img)
+                axes[i].set_title(f"Q: {data_lst['question'][i][:40]}...", fontsize=9, wrap=True)
+                axes[i].text(0.5, -0.15, f"A: {data_lst['answer'][i][:40]}...", 
+                           transform=axes[i].transAxes, fontsize=8, ha='center', wrap=True)
+                axes[i].axis('off')
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.data_dir, f'daveKevin_samples_{split}.png'), dpi=100, bbox_inches='tight')
+            logger.log(f"### Saved sample visualization to {args.data_dir}/daveKevin_samples_{split}.png")
+            plt.show()
+        except Exception as e:
+            logger.log(f"Warning: Could not plot images: {e}")
+        
+        vocab_dict = loaded_vocab
+        train_dataset = helper_tokenize(data_lst, vocab_dict, seq_len, split)
+        return train_dataset, data_lst
 
     if split == 'train':
         logger.log('### Loading from the TRAIN set...')
@@ -283,7 +391,11 @@ class ImageDataset(Dataset):
     def load_image_path(self):
         image_path = []
         for image_name in self.data_lst['image_name']:
-            image_path.append(f'{self.image_root}/{image_name}')
+            # For daveKevin dataset, images are stored in subdirectory
+            if self.args.dataset == 'daveKevin':
+                image_path.append(f'{self.args.data_dir}/daveKevin_images/{image_name}')
+            else:
+                image_path.append(f'{self.image_root}/{image_name}')
         return image_path
 
     def __getitem__(self, idx):
@@ -344,7 +456,7 @@ if __name__ == "__main__":
     import sys
     import os
     from torchvision import transforms
-    from transformers import BertTokenizer, BertModel
+    from transformers import AutoTokenizer, AutoModel
     import argparse
     import argparse
     import json, torch, os
@@ -360,12 +472,12 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default='Med_RAD')
     parser.add_argument('--image_dir', type=str, default='datasets/Med_RAD/image_folder')
     parser.add_argument('--vocab_path', type=str, default='datasets/vocab.json')
-    parser.add_argument('--vocab', type=str, default='bert')
-    parser.add_argument('--config_name', type=str, default='bert-base-uncased')
+    parser.add_argument('--vocab', type=str, default='roberta')
+    parser.add_argument('--config_name', type=str, default='roberta-large')
     parser.add_argument('--checkpoint_path', type=str, default='diffuvqa/config')
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--seq_len', type=int, default=64)
-    parser.add_argument('--hidden_dim', type=int, default=768)
+    parser.add_argument('--hidden_dim', type=int, default=1024)
     parser.add_argument('--json_path', type=str, default='datasets/Med_RAD/train.jsonl')
     parser.add_argument('--image_encoder', type=str, default='None')
     parser.add_argument('--image_size', type=int, default=224)
