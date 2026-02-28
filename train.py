@@ -136,6 +136,7 @@ def main():
     exporter.export_training_logs(
         log_dir=args.checkpoint_path,
         model_name="DiffuVQA",
+        dataset_name=args.dataset,
         lr=args.lr,
         batch_size=args.batch_size,
         total_training_time=total_training_time,

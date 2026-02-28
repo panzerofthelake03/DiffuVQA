@@ -94,6 +94,7 @@ class DiffuVQAExcelExporter:
                            include_wandb: bool = True,
                            lr: float = 0.0,
                            batch_size: int = 0,
+                           dataset_name: str = "Unknown",
                            total_training_time: float = 0.0,
                            avg_time_per_step: float = 0.0,
                            total_learning_steps: int = 0,
@@ -105,6 +106,7 @@ class DiffuVQAExcelExporter:
             log_dir: Directory containing training logs
             model_name: Name of the model
             include_wandb: Whether to include wandb logs
+            dataset_name: Name of the dataset used for training
             total_training_time: Total time taken to train the model (in seconds)
             avg_time_per_step: Average time per training step (in seconds)
             hardware_info: Information about the hardware used for training
@@ -125,7 +127,7 @@ class DiffuVQAExcelExporter:
         else:
             # Create an empty DataFrame with predefined columns
             existing_df = pd.DataFrame(columns=[
-                "model_name", "log_dir", "export_date", "total_training_time", 
+                "model_name", "log_dir", "data_set","export_date", "total_training_time", 
                 "avg_time_per_step", "total_learning_steps" ,"hardware_info"
             ])
 
@@ -135,6 +137,7 @@ class DiffuVQAExcelExporter:
             "lr": lr,
             "batch_size": batch_size,
             "log_dir": log_dir,
+            "data_set": dataset_name,
             "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "total_training_time": total_training_time,
             "avg_time_per_step": avg_time_per_step,

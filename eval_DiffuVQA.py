@@ -386,6 +386,8 @@ if __name__ == '__main__':
                         dataset_name = "Kvasir-VQA"
                     elif "med" in args.folder.lower():
                         dataset_name = "Med-VQA"
+                    elif "davekevin" in args.folder.lower():
+                        dataset_name = "DaveKevin-VQA"
                     
                     # Additional info
                     additional_info = {
