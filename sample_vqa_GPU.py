@@ -369,6 +369,7 @@ def main():
     # Define the sampling parameters to record
     sampling_parameters = {
         "model_path": args.model_path,
+        "dataset": args.dataset,
         "batch_size": args.batch_size,
         "top_p": args.top_p,
         "seed": args.seed,
