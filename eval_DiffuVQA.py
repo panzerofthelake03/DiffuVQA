@@ -6,7 +6,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from torchmetrics.text.rouge import ROUGEScore
-from excel_export_module import record_evaluation_data
+from shared.excel_export_module import record_evaluation_data
 
 rougeScore = ROUGEScore()
 # Temporarily disable BERT Score due to PyTorch version compatibility issues
@@ -63,7 +63,7 @@ except Exception as e:
 # Try to import Excel export module
 HAS_EXCEL_EXPORT = False
 try:
-    from excel_export_module import DiffuVQAExcelExporter
+    from shared.excel_export_module import DiffuVQAExcelExporter
     HAS_EXCEL_EXPORT = True
     print("Excel export module loaded successfully!")
 except Exception as e:

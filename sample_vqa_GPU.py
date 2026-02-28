@@ -17,7 +17,7 @@ from torchvision.transforms import transforms
 from transformers import set_seed
 from diffuvqa.rounding import denoised_fn_round, get_efficient_knn
 from diffuvqa.vqa_datasets import load_data_vqa
-from excel_export_module import record_sampling_data
+from shared.excel_export_module import record_sampling_data
 from datetime import datetime
 from tqdm.auto import tqdm
 

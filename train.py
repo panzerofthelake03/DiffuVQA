@@ -26,7 +26,7 @@ import wandb
 import sys
 import os
 from torchvision import transforms
-from excel_export_module import DiffuVQAExcelExporter
+from shared.excel_export_module import DiffuVQAExcelExporter
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
