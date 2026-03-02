@@ -24,6 +24,15 @@ class myTokenizer():
             # save
             tokenizer.save_pretrained(args.checkpoint_path)
             print('save tokenizer to', args.checkpoint_path)
+        elif args.vocab == 'roberta':
+            # Load RoBERTa tokenizer
+            tokenizer = AutoTokenizer.from_pretrained("roberta-large")
+            self.tokenizer = tokenizer
+            self.sep_token_id = tokenizer.sep_token_id
+            self.pad_token_id = tokenizer.pad_token_id
+            # save
+            tokenizer.save_pretrained(args.checkpoint_path)
+            print('save tokenizer to', args.checkpoint_path)
         else: 
             # load vocab from the path
             print('#'*30, 'load vocab from', args.vocab)
@@ -76,7 +85,19 @@ def load_model_emb(args, tokenizer):
 
     if os.path.exists(path_save):
         print('reload the random embeddings', model)
-        model.load_state_dict(torch.load(path_save))
+        try:
+            model.load_state_dict(torch.load(path_save))
+        except RuntimeError as e:
+            # Handle vocab size mismatch (e.g., switching from BERT to RoBERTa)
+            if "size mismatch" in str(e):
+                print(f"Warning: Embedding size mismatch. Reinitializing embeddings.")
+                print(f"  Old checkpoint vocab size likely doesn't match current tokenizer")
+                print(f"  Current tokenizer vocab size: {tokenizer.vocab_size}")
+                torch.nn.init.normal_(model.weight)
+                torch.save(model.state_dict(), path_save)
+                print(f"  Saved new embeddings to {path_save}")
+            else:
+                raise e
     else:
         print('initializing the random embeddings', model)
         torch.nn.init.normal_(model.weight)
@@ -127,6 +148,18 @@ def create_model_and_diffusion(args):
         config_name="bert-base-uncased",
         vocab_size=30522,
         init_pretrained="bert",
+        args=args
+    )
+
+    elif args.model == 'transformer-roberta':
+        model = TransformerNetModel(
+        input_dims=1024,
+        output_dims=1024,
+        hidden_t_dim=128,
+        dropout=0.1,
+        config_name="roberta-large",
+        vocab_size=50265,
+        init_pretrained="roberta",
         args=args
     )
 

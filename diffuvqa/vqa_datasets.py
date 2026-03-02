@@ -463,7 +463,7 @@ if __name__ == "__main__":
     import numpy as np
     from diffuvqa.vqa_datasets import load_data_vqa
     from diffuvqa.step_sample import create_named_schedule_sampler
-    from basic_utils import (
+    from shared.basic_utils import (
         load_model_emb,
         load_tokenizer)
 

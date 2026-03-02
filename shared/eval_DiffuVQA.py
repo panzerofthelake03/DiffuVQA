@@ -42,7 +42,7 @@ nltk.download('wordnet')
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
-from basic_utils import (
+from shared.basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     add_dict_to_argparser,

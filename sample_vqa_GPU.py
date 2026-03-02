@@ -29,7 +29,7 @@ import sys
 import contextlib
 from diffuvqa.utils import dist_util, logger
 from functools import partial
-from basic_utils import (
+from shared.basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     add_dict_to_argparser,
