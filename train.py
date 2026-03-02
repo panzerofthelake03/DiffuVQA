@@ -19,7 +19,7 @@ from basic_utils import (
     load_model_emb,
     load_tokenizer
 )
-from train_util import TrainLoop
+from shared.train_util import TrainLoop
 from transformers import set_seed
 import wandb
 
