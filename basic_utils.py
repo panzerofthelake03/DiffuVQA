@@ -128,16 +128,24 @@ def create_model_and_diffusion(args):
         model = TransformerNet(args=args)
 
     elif args.model == 'transformer-bert':
-        model =  TransformerNetModel(
-        input_dims=768,
-        output_dims=768,
-        hidden_t_dim=128,
-        dropout=0.1,
-        config_name="bert-base-uncased",
-        vocab_size=30522,
-        init_pretrained="bert",
-        args=args
-    )
+        # config_name ve init_pretrained'i args'tan al
+        _plm = getattr(args, 'use_plm_init', 'bert')
+        if _plm == 'pubmedbert':
+            _config_name = 'NeuML/pubmedbert-base-embeddings'
+        else:
+            _config_name = 'bert-base-uncased'
+            _plm = 'bert'  # 'no' veya başka değer geldiyse bert'e düşür
+
+        model = TransformerNetModel(
+            input_dims=args.hidden_dim,
+            output_dims=args.hidden_dim,
+            hidden_t_dim=args.hidden_t_dim,
+            dropout=args.dropout,
+            config_name=_config_name,
+            vocab_size=args.vocab_size,
+            init_pretrained=_plm,
+            args=args
+        )
 
     betas = gd.get_named_beta_schedule(args.noise_schedule, args.diffusion_steps)
 
