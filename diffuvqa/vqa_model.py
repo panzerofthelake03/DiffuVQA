@@ -404,51 +404,6 @@ class TransformerNetModel(nn.Module):
 
             del temp_bert.embeddings
             del temp_bert.pooler
-            # If the pretrained token embeddings size differs from the
-            # configured hidden_dim, add a small projection to map them
-            # into the model latent space used by the rest of the network.
-            try:
-                bert_emb_dim = self.word_embedding.weight.size(1)
-                # Project token embeddings into the transformer's hidden size
-                # (config.hidden_size) so downstream components see the same
-                # feature dimensionality.
-                target_dim = self.hidden_size
-                if bert_emb_dim != target_dim:
-                    self.word_embedding_proj = nn.Linear(bert_emb_dim, target_dim)
-                    # initialize similarly to other linears
-                    self.word_embedding_proj.weight.data.normal_(mean=0.0, std=0.02)
-                    if self.word_embedding_proj.bias is not None:
-                        self.word_embedding_proj.bias.data.zero_()
-            except Exception:
-                pass
-            self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
-
-            with th.no_grad():
-                self.lm_head.weight = self.word_embedding.weight
-            # self.lm_head.weight.requires_grad = False
-            # self.word_embedding.weight.requires_grad = False
-
-            self.input_transformers = temp_bert.encoder
-            self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
-            self.position_embeddings = temp_bert.embeddings.position_embeddings
-            self.LayerNorm = temp_bert.embeddings.LayerNorm
-
-            # Project pretrained position embeddings to args.hidden_dim if needed
-            try:
-                pos_dim = self.position_embeddings.weight.size(1)
-                # Project positional embeddings into the transformer's hidden
-                # size so they can be added to other transformer inputs.
-                target_dim = self.hidden_size
-                if pos_dim != target_dim:
-                    self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
-                    self.position_embeddings_proj.weight.data.normal_(mean=0.0, std=0.02)
-                    if self.position_embeddings_proj.bias is not None:
-                        self.position_embeddings_proj.bias.data.zero_()
-            except Exception:
-                pass
-
-            del temp_bert.embeddings
-            del temp_bert.pooler
 
         elif init_pretrained == 'no':
             self.input_transformers = BertEncoder(config)
