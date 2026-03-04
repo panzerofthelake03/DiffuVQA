@@ -124,9 +124,17 @@ The `train.py` script is used to train the DiffuVQA model on a specified dataset
 
 ### Example Command
 ```bash
-.\venv\Scripts\python.exe .   
+.\venv\Scripts\python.exe .\train.py \
+    --lr 0.0001 \
+    --batch_size 4 \
+    --learning_steps 200 \
+    --save_interval 100 \
+    --log_interval 25 \
+    --data_dir datasets \
+    --image_dir datasets/slake/imgs \
+    --dataset slake
 ```
-python .\train.py --lr 0.0001 --batch_size 4 --learning_steps 500 --save_interval 100 --data_dir datasets --image_dir datasets/slake/imgs/imgs
+
 ---
 
 ## `eval_DiffuVQA.py`

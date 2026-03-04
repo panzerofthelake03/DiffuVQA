@@ -7,7 +7,7 @@ Docstrings have been added, as well as DDIM sampling and a new collection of bet
 
 import enum
 import math
-from diffuvqa.utils import logger
+
 import numpy as np
 import torch as th
 import sys
@@ -515,8 +515,7 @@ class GaussianDiffusion:
             indices = tqdm(indices)
 
         for i in indices:  # from T to 0
-            if os.environ.get('DVQA_DEBUG', '0') == '1':
-                logger.log(f"p_sample_loop_progressive step: {i}")
+            print(i)
             t = th.tensor([i] * shape[0], device=device)
             if not clamp_first:
                 if i > clamp_step:
@@ -646,10 +645,9 @@ class GaussianDiffusion:
                                    th.tensor([0]).to(x_start_mean.device),
                                    x_start_mean.shape)
 
-        # DEBUG: print shapes to diagnose mismatches in q_sample (gate behind DVQA_DEBUG)
+        # DEBUG: print shapes to diagnose mismatches in q_sample
         try:
-            if os.environ.get('DVQA_DEBUG', '0') == '1':
-                logger.log(f"DEBUG shapes: ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start_mean={tuple(x_start_mean.shape)}, x_start={tuple(x_start.shape)}, cond_x_start={tuple(cond_x_start.shape)}")
+            print(f"DEBUG shapes: ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start_mean={tuple(x_start_mean.shape)}, x_start={tuple(x_start.shape)}, cond_x_start={tuple(cond_x_start.shape)}", flush=True)
         except Exception:
             pass
         # print(std.shape, )
@@ -658,19 +656,19 @@ class GaussianDiffusion:
 
         cond_x_start = torch.cat([ddpm_input_pre, x_start], dim=1)
 
-        # DEBUG: print shapes to help diagnose mismatches (gate behind DVQA_DEBUG)
-        try:
-            if os.environ.get('DVQA_DEBUG', '0') == '1':
-                logger.log("DEBUG training_losses_seq2seq shapes:")
-                logger.log(f" ddpm_input_pre: {tuple(ddpm_input_pre.shape)}")
-                logger.log(f" x_start_mean: {tuple(x_start_mean.shape)}")
-                logger.log(f" x_start: {tuple(x_start.shape)}")
-                logger.log(f" cond_x_start: {tuple(cond_x_start.shape)}")
-                logger.log(f" f (will be set to cond_x_start): {tuple(cond_x_start.shape)}")
-                logger.log(f" mask: {None if mask is None else tuple(mask.shape)}")
-                logger.log(f" t: {None if t is None else tuple(t.shape)}")
-        except Exception:
-            pass
+        # DEBUG: print shapes to help diagnose mismatches (only if DEBUG_SHAPES env var is set)
+        if os.environ.get('DEBUG_SHAPES', '0') == '1':
+            try:
+                print("DEBUG training_losses_seq2seq shapes:")
+                print(" ddpm_input_pre:", tuple(ddpm_input_pre.shape))
+                print(" x_start_mean:", tuple(x_start_mean.shape))
+                print(" x_start:", tuple(x_start.shape))
+                print(" cond_x_start:", tuple(cond_x_start.shape))
+                print(" f (will be set to cond_x_start):", tuple(cond_x_start.shape))
+                print(" mask:", None if mask is None else tuple(mask.shape))
+                print(" t:", None if t is None else tuple(t.shape))
+            except Exception:
+                pass
 
         if noise is None:
             noise = th.randn_like(cond_x_start)
@@ -685,7 +683,7 @@ class GaussianDiffusion:
         # Sanity check shapes: q_sample expects x_start and f to have identical
         # shapes. If they differ, print detailed diagnostics and raise.
         if cond_x_start.shape != f.shape:
-            logger.log(f"SHAPE MISMATCH before q_sample: cond_x_start={tuple(cond_x_start.shape)}, f={tuple(f.shape)}, ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start={tuple(x_start.shape)}, x_start_mean={tuple(x_start_mean.shape)}")
+            print(f"SHAPE MISMATCH before q_sample: cond_x_start={tuple(cond_x_start.shape)}, f={tuple(f.shape)}, ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start={tuple(x_start.shape)}, x_start_mean={tuple(x_start_mean.shape)}", flush=True)
             raise RuntimeError("cond_x_start and f have different shapes before q_sample")
 
         # Ensure mask length matches cond_x_start sequence length by expanding
@@ -744,7 +742,7 @@ class GaussianDiffusion:
         # Debug print to verify slicing indices when DVQA_DEBUG=1
         try:
             if os.environ.get('DVQA_DEBUG', '0') == '1':
-                logger.log(f"DEBUG extracting model_out_x_start: total_len={total_len}, target_len={target_len}, start_idx={start_idx}")
+                print(f"DEBUG extracting model_out_x_start: total_len={total_len}, target_len={target_len}, start_idx={start_idx}")
         except Exception:
             pass
         model_out_x_start = cond_model_out_x_start[:, start_idx:, :]
@@ -924,8 +922,7 @@ class GaussianDiffusion:
             indices = tqdm(indices)
 
         for i in indices:
-            if os.environ.get('DVQA_DEBUG', '0') == '1':
-                logger.log(f"ddim_sample_loop_progressive step: {i}")
+            print(i)
             t = th.tensor([i] * shape[0], device=device)
             with th.no_grad():
                 out = self.ddim_sample(
@@ -1056,4 +1053,4 @@ class _WrappedModel:
 
         # return self.model(x, new_ts, **kwargs)
         return self.model(x, new_ts)
-
+        

@@ -139,7 +139,7 @@ class feature_fusion(nn.Module):
         q_mask = (q_ids != 0).long().to(q_ids.device)
         q_input_shape = q_mask.size()
         question_emb = self.language_encoder(q_ids)
-        extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, dtype=question_emb.dtype)
+        extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, device=q_ids.device)
         for layer in self.bert.encoder.layer:
             question_feats = layer(question_emb, extended_q_masks)[0]
         question_feats = self.question_feature_proj(question_feats)  # B 32 768
@@ -293,6 +293,117 @@ class TransformerNetModel(nn.Module):
             temp_bert = BertModel.from_pretrained(config_name, config=config)
 
             self.word_embedding = temp_bert.embeddings.word_embeddings
+            # If the pretrained token embeddings size differs from the
+            # configured hidden_dim, add a small projection to map them
+            # into the model latent space used by the rest of the network.
+            try:
+                bert_emb_dim = self.word_embedding.weight.size(1)
+                # Project token embeddings into the transformer's hidden size
+                # (config.hidden_size) so downstream components see the same
+                # feature dimensionality.
+                target_dim = self.hidden_size
+                if bert_emb_dim != target_dim:
+                    self.word_embedding_proj = nn.Linear(bert_emb_dim, target_dim)
+                    # initialize similarly to other linears
+                    self.word_embedding_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.word_embedding_proj.bias is not None:
+                        self.word_embedding_proj.bias.data.zero_()
+            except Exception:
+                pass
+            self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
+
+            with th.no_grad():
+                self.lm_head.weight = self.word_embedding.weight
+            # self.lm_head.weight.requires_grad = False
+            # self.word_embedding.weight.requires_grad = False
+
+            self.input_transformers = temp_bert.encoder
+            self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+            self.position_embeddings = temp_bert.embeddings.position_embeddings
+            self.LayerNorm = temp_bert.embeddings.LayerNorm
+
+            # Project pretrained position embeddings to args.hidden_dim if needed
+            try:
+                pos_dim = self.position_embeddings.weight.size(1)
+                # Project positional embeddings into the transformer's hidden
+                # size so they can be added to other transformer inputs.
+                target_dim = self.hidden_size
+                if pos_dim != target_dim:
+                    self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
+                    self.position_embeddings_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.position_embeddings_proj.bias is not None:
+                        self.position_embeddings_proj.bias.data.zero_()
+            except Exception:
+                pass
+
+            del temp_bert.embeddings
+            del temp_bert.pooler
+
+        elif init_pretrained == 'pubmedbert':
+            print('initializing from pretrained PubMedBERT (medical domain)...')
+            print(config)
+
+            # PubMedBERT uses same architecture as BERT-base (768 hidden)
+            pubmed_config = BertConfig(
+                vocab_size=args.vocab_size,
+                hidden_size=args.hidden_size,
+                num_hidden_layers=args.num_layers,
+                num_attention_heads=args.num_heads,
+                intermediate_size=args.hidden_size * args.mlp_ratio,
+                max_position_embeddings=args.seq_len,
+                hidden_dropout_prob=args.dropout,
+                attention_probs_dropout_prob=args.dropout,
+            )
+
+            # Load PubMedBERT model trained on medical literature
+            temp_bert = BertModel.from_pretrained('NeuML/pubmedbert-base-embeddings', config=config)
+
+            self.word_embedding = temp_bert.embeddings.word_embeddings
+            # If the pretrained token embeddings size differs from the
+            # configured hidden_dim, add a small projection to map them
+            # into the model latent space used by the rest of the network.
+            try:
+                bert_emb_dim = self.word_embedding.weight.size(1)
+                # Project token embeddings into the transformer's hidden size
+                # (config.hidden_size) so downstream components see the same
+                # feature dimensionality.
+                target_dim = self.hidden_size
+                if bert_emb_dim != target_dim:
+                    self.word_embedding_proj = nn.Linear(bert_emb_dim, target_dim)
+                    # initialize similarly to other linears
+                    self.word_embedding_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.word_embedding_proj.bias is not None:
+                        self.word_embedding_proj.bias.data.zero_()
+            except Exception:
+                pass
+            self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
+
+            with th.no_grad():
+                self.lm_head.weight = self.word_embedding.weight
+            # self.lm_head.weight.requires_grad = False
+            # self.word_embedding.weight.requires_grad = False
+
+            self.input_transformers = temp_bert.encoder
+            self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+            self.position_embeddings = temp_bert.embeddings.position_embeddings
+            self.LayerNorm = temp_bert.embeddings.LayerNorm
+
+            # Project pretrained position embeddings to args.hidden_dim if needed
+            try:
+                pos_dim = self.position_embeddings.weight.size(1)
+                # Project positional embeddings into the transformer's hidden
+                # size so they can be added to other transformer inputs.
+                target_dim = self.hidden_size
+                if pos_dim != target_dim:
+                    self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
+                    self.position_embeddings_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.position_embeddings_proj.bias is not None:
+                        self.position_embeddings_proj.bias.data.zero_()
+            except Exception:
+                pass
+
+            del temp_bert.embeddings
+            del temp_bert.pooler
             # If the pretrained token embeddings size differs from the
             # configured hidden_dim, add a small projection to map them
             # into the model latent space used by the rest of the network.

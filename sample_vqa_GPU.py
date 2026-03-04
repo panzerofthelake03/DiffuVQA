@@ -17,9 +17,8 @@ from torchvision.transforms import transforms
 from transformers import set_seed
 from diffuvqa.rounding import denoised_fn_round, get_efficient_knn
 from diffuvqa.vqa_datasets import load_data_vqa
-from shared.excel_export_module import record_sampling_data
+from excel_export_module import record_sampling_data
 from datetime import datetime
-from tqdm.auto import tqdm
 
 # from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
@@ -29,7 +28,7 @@ import sys
 import contextlib
 from diffuvqa.utils import dist_util, logger
 from functools import partial
-from shared.basic_utils import (
+from basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     add_dict_to_argparser,
@@ -74,17 +73,18 @@ def main():
 
     args = create_argparser().parse_args()
 
-    logger.configure()
-    logger.log(f"DEBUG: Parsed model_path = {args.model_path}")
+    # Debug: Print the parsed model_path
+    print(f"DEBUG: Parsed model_path = {args.model_path}")
 
     # Backwards-compatibility: some older training runs don't record newer flags.
     if not hasattr(args, 'use_noising_f'):
         args.use_noising_f = False
 
-    logger.log("### Loading model from %s" % args.model_path)
+    logger.configure()
+    print("### Loading model from", args.model_path)
     # load configurations.
     config_path = os.path.join(os.path.split(args.model_path)[0], "training_args.json")
-    logger.log(f"config_path: {config_path}")
+    print(config_path)
     with open(config_path, 'rb', ) as f:
         training_args = json.load(f)
 
@@ -99,7 +99,7 @@ def main():
     
     if(original_model_path != ""):
         args.model_path = original_model_path
-    logger.log(f"### Updated args: {args}")
+    print("### Updated args:", args)
 
     if(original_Seed is not None):
         args.seed = original_Seed
@@ -107,7 +107,7 @@ def main():
     if(original_batch_size is not None):
         args.batch_size = original_batch_size
 
-    logger.log(f">>> diffusion_steps before: {original_diffusion_step}")
+    print(">>> diffusion_steps before:", original_diffusion_step)
     if(original_diffusion_step is not None):
         args.step = original_diffusion_step
 
@@ -135,14 +135,19 @@ def main():
 
     logger.log("### Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args=args)
-    state_dict = torch.load(args.model_path, map_location="cuda")
+    
+    # Determine device
+    device = th.device("cuda" if th.cuda.is_available() else "cpu")
+    logger.log(f"### Using device: {device}")
+    
+    state_dict = torch.load(args.model_path, map_location=device, weights_only=False)
     new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
     model.load_state_dict(new_state_dict)
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
     logger.log(f'### The parameter count is {pytorch_total_params}')
 
-    model.eval().requires_grad_(False).to(th.device("cuda"))
+    model.eval().requires_grad_(False).to(device)
 
     tokenizer = load_tokenizer(args)
     # Create a model embedding object for nearest-neighbor / rounding.
@@ -156,7 +161,7 @@ def main():
         # Use the model's embedding module directly to avoid mismatched shape assertions.
         model_emb = model.word_embedding.eval().requires_grad_(False)
         try:
-            model_emb.to(th.device("cuda"))
+            model_emb.to(device)
         except Exception:
             pass
 
@@ -190,10 +195,10 @@ def main():
         os.makedirs(samples_dir, exist_ok=True)
 
     # Create a compact filename: <model_folder>.<checkpoint>.seed<seed>_step<clamp>.jsonl
-    logger.log(f"<<<<model_base_name: {model_base_name}")
-    logger.log(f"<<<<args.model_path: {args.model_path}")
+    print("<<<<model_base_name:", model_base_name)
+    print("<<<<args.model_path:", args.model_path)
     checkpoint_name = os.path.basename(args.model_path)  # Get the actual model file name
-    logger.log(f"<<<<<checkpoint_name: {checkpoint_name}")
+    print("<<<<<checkpoint_name:", checkpoint_name)
     out_filename = f"{checkpoint_name}.seed{args.seed}_step{args.clamp_step}_samplestep{args.step}_bsize{args.batch_size}.jsonl"
     # Truncate filename if it's excessively long to avoid Windows path length issues.
     if len(out_filename) > 200:
@@ -203,156 +208,156 @@ def main():
     # Ensure parent directory exists (defensive) before opening the file.
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-    logger.log(f"out_path: {out_path}")
-    logger.log(f"batch_size: {args.batch_size}")
+    print("out_path:", out_path)
+    print("batch_size:", args.batch_size)
     all_text_data = []
     all_image_data = []
 
     try:
-        total_loader = None
-        try:
-            total_loader = len(data_test)
-        except Exception:
-            total_loader = None
-
-        for image, cond in tqdm(data_test, desc="Loading test data", total=total_loader):
-            cond['input_q_id'] = cond['input_q_id'].to(th.device("cuda"))
-            cond['input_ids'] = cond['input_ids'].to(th.device("cuda"))
+        for image, cond in data_test:
+            cond['input_q_id'] = cond['input_q_id'].to(device)
+            cond['input_ids'] = cond['input_ids'].to(device)
             all_text_data.append(cond)
-            all_image_data.append(image.to(th.device("cuda")))
+            all_image_data.append(image.to(device))
     except StopIteration:
-        logger.log('### End of reading iteration...')
+        print('### End of reading iteration...')
 
-    model_emb.to(th.device("cuda"))
+    model_emb.to(device)
 
     text_iterator = iter(all_text_data)
     image_iterator = iter(all_image_data)
 
-    # iterate using tqdm to show sampling progress
-    # Silence console logger output during heavy sampling to avoid
-    # interleaved logger lines that push tqdm into duplicate bars.
-    with logger.scoped_configure(dir=logger.get_dir(), format_strs=["log"]):
-        for image, cond in tqdm(zip(image_iterator, text_iterator), desc="Sampling", total=len(all_text_data)):
+    # Add progress bar for sampling
+    from tqdm import tqdm
+    total_batches = len(all_text_data)
+    pbar = tqdm(total=total_batches, desc="Sampling", unit="batch",
+               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
 
-            if not cond:
-                continue
+    for image, cond in zip(image_iterator, text_iterator):
 
-            input_ids_x = cond.pop('input_ids').to(th.device("cuda"))
-            input_ids_a = cond.pop('input_a_id').to(th.device("cuda"))
-            input_emb = model.get_embeds(input_ids_a)
+        if not cond:
+            pbar.update(1)
+            continue
 
-            # masks and metadata
-            input_ids_mask = cond.pop('input_mask').to(th.device("cuda"))
-            input_ids_mask_ori = input_ids_mask.to(th.device("cpu"))
-            image_name = cond.pop('image_name')
+        input_ids_x = cond.pop('input_ids').to(device)
+        input_ids_a = cond.pop('input_a_id').to(device)
+        input_emb = model.get_embeds(input_ids_a)
 
-            # x_start mean prep
-            fuse_feats, _ = model.get_ddpm_input(image, cond)
-            f = torch.cat([fuse_feats, fuse_feats], dim=1)
-            # debug: fuse_feats.shape suppressed to avoid noisy stdout
-            x_start = torch.cat([fuse_feats, input_emb], dim=1)
+        # masks and metadata
+        input_ids_mask = cond.pop('input_mask').to(device)
+        input_ids_mask_ori = input_ids_mask.to(th.device("cpu"))
+        image_name = cond.pop('image_name')
 
-            # Build a full mask that covers the image-fuse tokens (zeros) + text tokens (input_ids_mask)
-            fuse_len = fuse_feats.size(1)
-            bsz = input_ids_mask.size(0)
-            fuse_mask = th.zeros((bsz, fuse_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device)
-            full_mask = th.cat([fuse_mask, input_ids_mask], dim=1)
+        # x_start mean prep
+        fuse_feats, _ = model.get_ddpm_input(image, cond)
+        f = torch.cat([fuse_feats, fuse_feats], dim=1)
+    # debug: fuse_feats.shape suppressed to avoid noisy stdout
+        x_start = torch.cat([fuse_feats, input_emb], dim=1)
 
-            # Ensure full_mask length matches x_start sequence length; pad or truncate as needed
-            total_len = x_start.size(1)
-            cur_len = full_mask.size(1)
-            if cur_len < total_len:
-                pad_len = total_len - cur_len
-                pad_tensor = th.zeros((bsz, pad_len), dtype=full_mask.dtype, device=full_mask.device)
-                full_mask = th.cat([full_mask, pad_tensor], dim=1)
-            elif cur_len > total_len:
-                full_mask = full_mask[:, :total_len]
+        # Build a full mask that covers the image-fuse tokens (zeros) + text tokens (input_ids_mask)
+        fuse_len = fuse_feats.size(1)
+        bsz = input_ids_mask.size(0)
+        fuse_mask = th.zeros((bsz, fuse_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device)
+        full_mask = th.cat([fuse_mask, input_ids_mask], dim=1)
 
-            input_ids_mask = th.broadcast_to(full_mask.unsqueeze(dim=-1), x_start.shape).to(th.device("cuda"))
+        # Ensure full_mask length matches x_start sequence length; pad or truncate as needed
+        total_len = x_start.size(1)
+        cur_len = full_mask.size(1)
+        if cur_len < total_len:
+            pad_len = total_len - cur_len
+            pad_tensor = th.zeros((bsz, pad_len), dtype=full_mask.dtype, device=full_mask.device)
+            full_mask = th.cat([full_mask, pad_tensor], dim=1)
+        elif cur_len > total_len:
+            full_mask = full_mask[:, :total_len]
 
-            noise = th.randn_like(x_start)
-            if args.use_noising_f:
-                logger.log("noising f")
-                noise = alphas_bar_sqrt[num_steps - 1] * f + one_minus_alphas_bar_sqrt[num_steps - 1] * noise
+        input_ids_mask = th.broadcast_to(full_mask.unsqueeze(dim=-1), x_start.shape).to(device)
 
-            x_noised = th.where(input_ids_mask == 0, x_start, noise)
+        noise = th.randn_like(x_start)
+        if args.use_noising_f:
+            print("noising f")
+            noise = alphas_bar_sqrt[num_steps - 1] * f + one_minus_alphas_bar_sqrt[num_steps - 1] * noise
 
-            model_kwargs = {}
+        x_noised = th.where(input_ids_mask == 0, x_start, noise)
 
-            if args.step == args.diffusion_steps:
-                args.use_ddim = False
-                step_gap = 1
-            else:
-                args.use_ddim = True
-                step_gap = args.diffusion_steps // args.step
+        model_kwargs = {}
 
-            sample_fn = (diffusion.p_sample_loop if not args.use_ddim else diffusion.ddim_sample_loop)
+        if args.step == args.diffusion_steps:
+            args.use_ddim = False
+            step_gap = 1
+        else:
+            args.use_ddim = True
+            step_gap = args.diffusion_steps // args.step
 
-            sample_shape = (x_start.shape[0], args.seq_len, args.hidden_dim)
+        sample_fn = (diffusion.p_sample_loop if not args.use_ddim else diffusion.ddim_sample_loop)
 
-            # The diffusion sampling procedure prints progress using carriage returns
-            # which causes the terminal to repeatedly overwrite the same lines on
-            # some shells (PowerShell). Suppress stdout/stderr for the duration of
-            # the sampling to keep the terminal clean.
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                samples = sample_fn(
-                    model,
-                    sample_shape,
-                    noise=x_noised,
-                    clip_denoised=args.clip_denoised,
-                    denoised_fn=partial(denoised_fn_round, args, model_emb),
-                    model_kwargs=model_kwargs,
-                    top_p=args.top_p,
-                    clamp_step=args.clamp_step,
-                    clamp_first=True,
-                    mask=input_ids_mask,
-                    x_start=x_start,
-                    gap=step_gap,
-                )
+        sample_shape = (x_start.shape[0], args.seq_len, args.hidden_dim)
 
-            sample = samples[-1]
-            a_shape = sample.size(1) // 2
-            sample = sample[:, a_shape:, :]
-            # sample shape suppressed
-            logits = model.get_logits(sample)
-            cands = th.topk(logits, k=1, dim=-1)
+        # The diffusion sampling procedure prints progress using carriage returns
+        # which causes the terminal to repeatedly overwrite the same lines on
+        # some shells (PowerShell). Suppress stdout/stderr for the duration of
+        # the sampling to keep the terminal clean.
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            samples = sample_fn(
+                model,
+                sample_shape,
+                noise=x_noised,
+                clip_denoised=args.clip_denoised,
+                denoised_fn=partial(denoised_fn_round, args, model_emb),
+                model_kwargs=model_kwargs,
+                top_p=args.top_p,
+                clamp_step=args.clamp_step,
+                clamp_first=True,
+                mask=input_ids_mask,
+                x_start=x_start,
+                gap=step_gap,
+            )
 
-            probs = th.softmax(logits, dim=-1)
-            chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
-            seq_confidence = chosen_probs.mean(dim=1)
-            seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
+        sample = samples[-1]
+        a_shape = sample.size(1) // 2
+        sample = sample[:, a_shape:, :]
+    # sample shape suppressed
+        logits = model.get_logits(sample)
+        cands = th.topk(logits, k=1, dim=-1)
 
-            try:
-                sample_flat = sample.contiguous().view(-1, sample.size(-1))
-                val, idx_nn = get_efficient_knn(model_emb.weight.to(sample.device), sample_flat)
-                val = val.view(sample.size(0), sample.size(1))
-                avg_nn_dist = (-val).mean(dim=1)
-            except Exception:
-                avg_nn_dist = th.zeros(sample.size(0), device=sample.device)
+        probs = th.softmax(logits, dim=-1)
+        chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
+        seq_confidence = chosen_probs.mean(dim=1)
+        seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
 
-            word_lst_recover = []
-            word_lst_ref = []
-            word_lst_source = []
+        try:
+            sample_flat = sample.contiguous().view(-1, sample.size(-1))
+            val, idx_nn = get_efficient_knn(model_emb.weight.to(sample.device), sample_flat)
+            val = val.view(sample.size(0), sample.size(1))
+            avg_nn_dist = (-val).mean(dim=1)
+        except Exception:
+            avg_nn_dist = th.zeros(sample.size(0), device=sample.device)
 
-            # debug tensor printing removed to avoid huge outputs that clutter/overwrite
-            # the terminal during long runs.
-            for seq, input_mask in zip(cands.indices, input_ids_mask_ori):
-                seq = seq.to(th.device("cpu"))
-                tokens = tokenizer.decode_token(seq)
-                word_lst_recover.append(tokens)
+        word_lst_recover = []
+        word_lst_ref = []
+        word_lst_source = []
 
-            for seq, input_mask in zip(input_ids_x, input_ids_mask_ori):
-                seq = seq.to(th.device("cpu"))
-                word_lst_source.append(tokenizer.decode_token(seq[:args.seq_len]))
-                word_lst_ref.append(tokenizer.decode_token(seq[args.seq_len:]))
+    # debug tensor printing removed to avoid huge outputs that clutter/overwrite
+    # the terminal during long runs.
+        for seq, input_mask in zip(cands.indices, input_ids_mask_ori):
+            seq = seq.to(th.device("cpu"))
+            tokens = tokenizer.decode_token(seq)
+            word_lst_recover.append(tokens)
 
-            with open(out_path, 'a', encoding='utf-8') as fout:
-                for i, (recov, ref, src, image_name_i) in enumerate(zip(word_lst_recover, word_lst_ref, word_lst_source, image_name)):
-                    conf_val = float(seq_confidence[i].cpu().item()) if 'seq_confidence' in locals() else None
-                    avg_dist = float(avg_nn_dist[i].cpu().item()) if 'avg_nn_dist' in locals() else None
-                    rationale = f"Average token prob={conf_val:.3f}, avg_nn_l2={avg_dist:.3f}" if conf_val is not None else "n/a"
-                    out_obj = {"image_name": image_name_i, "question": src, "reference_answer": ref, "generate_answer": recov, "confidence": conf_val, "rationale": rationale}
-                    print(json.dumps(out_obj, ensure_ascii=False), file=fout)
+        for seq, input_mask in zip(input_ids_x, input_ids_mask_ori):
+            seq = seq.to(th.device("cpu"))
+            word_lst_source.append(tokenizer.decode_token(seq[:args.seq_len]))
+            word_lst_ref.append(tokenizer.decode_token(seq[args.seq_len:]))
+
+        with open(out_path, 'a', encoding='utf-8') as fout:
+            for i, (recov, ref, src, image_name_i) in enumerate(zip(word_lst_recover, word_lst_ref, word_lst_source, image_name)):
+                conf_val = float(seq_confidence[i].cpu().item()) if 'seq_confidence' in locals() else None
+                avg_dist = float(avg_nn_dist[i].cpu().item()) if 'avg_nn_dist' in locals() else None
+                rationale = f"Average token prob={conf_val:.3f}, avg_nn_l2={avg_dist:.3f}" if conf_val is not None else "n/a"
+                out_obj = {"image_name": image_name_i, "question": src, "reference_answer": ref, "generate_answer": recov, "confidence": conf_val, "rationale": rationale}
+                print(json.dumps(out_obj, ensure_ascii=False), file=fout)
+        
+        # Update progress bar after each batch
+        pbar.update(1)
         # break
         #
         # for (recov, ref, src) in zip(word_lst_recover, word_lst_ref, word_lst_source):
@@ -361,15 +366,17 @@ def main():
         #           file=fout)
         # fout.close()
 
+    # Close progress bar
+    pbar.close()
+
     # After sampling is completed, calculate total sample size and record parameters
 
-    total_samples = len(all_text_data) * args.batch_size # Calculate the total number of samples
+    total_samples = len(all_text_data)  # Calculate the total number of samples
     sampling_duration = time.time() - start_t  # Calculate the total sampling duration
 
     # Define the sampling parameters to record
     sampling_parameters = {
         "model_path": args.model_path,
-        "dataset": args.dataset,
         "batch_size": args.batch_size,
         "top_p": args.top_p,
         "seed": args.seed,
@@ -381,10 +388,10 @@ def main():
     # Record the sampling data in the Excel file
     record_sampling_data(sampling_parameters, output_dir="reports")
 
-    logger.log(f"### Recorded sampling data: {sampling_parameters}")
+    print(f"### Recorded sampling data: {sampling_parameters}")
 
-    logger.log('### Total takes {:.2f}s .....'.format(time.time() - start_t))
-    logger.log(f'### Written the decoded output to {out_path}')
+    print('### Total takes {:.2f}s .....'.format(time.time() - start_t))
+    print(f'### Written the decoded output to {out_path}')
 
 
 if __name__ == "__main__":

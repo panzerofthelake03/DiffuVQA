@@ -11,7 +11,7 @@ import numpy as np
 from diffuvqa.utils import dist_util, logger
 from diffuvqa.vqa_datasets import load_data_vqa
 from diffuvqa.step_sample import create_named_schedule_sampler
-from shared.basic_utils import (
+from basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     args_to_dict,
@@ -19,14 +19,14 @@ from shared.basic_utils import (
     load_model_emb,
     load_tokenizer
 )
-from shared.train_util import TrainLoop
+from train_util import TrainLoop
 from transformers import set_seed
 import wandb
 
 import sys
 import os
 from torchvision import transforms
-from shared.excel_export_module import DiffuVQAExcelExporter
+from excel_export_module import DiffuVQAExcelExporter
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -69,16 +69,16 @@ def main():
         data_valid = None
 
 
-    logger.log(f"{'#'*30} size of vocab {args.vocab_size}")
+    print('#'*30, 'size of vocab', args.vocab_size)
 
     logger.log("### Creating model and diffusion...")
-    logger.log(f"use{args.model}")
+    print("use{}".format(args.model))
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
     model, diffusion = create_model_and_diffusion(args=args)
     # print('#'*30, 'cuda', dist_util.dev())
 
     if torch.cuda.device_count() > 1:
-        logger.log(f"Using {torch.cuda.device_count()} GPUs")
+        print(f"Let's use {torch.cuda.device_count()} GPUs!")
         model = nn.DataParallel(model)
 
     model.to(dist_util.dev()) #  DEBUG **
@@ -136,7 +136,6 @@ def main():
     exporter.export_training_logs(
         log_dir=args.checkpoint_path,
         model_name="DiffuVQA",
-        dataset_name=args.dataset,
         lr=args.lr,
         batch_size=args.batch_size,
         total_training_time=total_training_time,

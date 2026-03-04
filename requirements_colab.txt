@@ -1,0 +1,41 @@
+# Colab-specific requirements (PyTorch already installed)
+# Google Colab comes with PyTorch pre-installed, so we skip torch/torchvision
+
+# Transformers & Hugging Face tooling
+transformers>=4.22.2
+datasets>=2.0.0
+tokenizers
+sentencepiece
+huggingface-hub
+accelerate
+
+# Numerical & utility
+pyarrow
+scikit-learn
+psutil
+tqdm
+packaging
+pandas>=1.3.0
+openpyxl>=3.0.0
+
+# Image (Pillow usually pre-installed in Colab)
+Pillow
+
+# Evaluation / NLP toolkits
+nltk
+torchmetrics
+bert_score
+pycocoevalcap
+sentence-transformers>=2.0.0
+spacy>=3.4.0
+
+# Storage / I/O
+blobfile
+
+# Logging / experiment tracking
+wandb
+
+# Misc
+PyYAML
+setuptools
+typing-extensions

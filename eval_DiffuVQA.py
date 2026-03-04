@@ -6,7 +6,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from torchmetrics.text.rouge import ROUGEScore
-from shared.excel_export_module import record_evaluation_data
+from excel_export_module import record_evaluation_data
 
 rougeScore = ROUGEScore()
 # Temporarily disable BERT Score due to PyTorch version compatibility issues
@@ -37,12 +37,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 nltk.download('punkt')
-nltk.download('punkt_tab')
 nltk.download('wordnet')
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
-from shared.basic_utils import (
+from basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     add_dict_to_argparser,
@@ -63,7 +62,7 @@ except Exception as e:
 # Try to import Excel export module
 HAS_EXCEL_EXPORT = False
 try:
-    from shared.excel_export_module import DiffuVQAExcelExporter
+    from excel_export_module import DiffuVQAExcelExporter
     HAS_EXCEL_EXPORT = True
     print("Excel export module loaded successfully!")
 except Exception as e:
@@ -207,7 +206,7 @@ if __name__ == '__main__':
 
     if args.filename:
         # If a single file is specified, use it directly
-        files = [ args.folder + "/" + args.filename]
+        files = [ args.folder + "\\" + args.filename]
     else:
         # Otherwise, use all files in the folder
         files = sorted(glob.glob(f"{args.folder}/*jsonl"))
@@ -386,8 +385,6 @@ if __name__ == '__main__':
                         dataset_name = "Kvasir-VQA"
                     elif "med" in args.folder.lower():
                         dataset_name = "Med-VQA"
-                    elif "davekevin" in args.folder.lower():
-                        dataset_name = "DaveKevin-VQA"
                     
                     # Additional info
                     additional_info = {

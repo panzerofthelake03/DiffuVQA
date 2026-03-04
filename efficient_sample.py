@@ -14,7 +14,7 @@ from tqdm import tqdm
 import time
 
 # Import DiffuVQA modules
-from shared.basic_utils import (
+from basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     add_dict_to_argparser,
@@ -129,12 +129,16 @@ def main():
     print("Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args=args)
     
+    # Determine device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    
     # Load model weights
     print(f"Loading model from {args.model_path}")
-    state_dict = torch.load(args.model_path, map_location="cuda")
+    state_dict = torch.load(args.model_path, map_location=device, weights_only=False)
     new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
     model.load_state_dict(new_state_dict)
-    model.eval().requires_grad_(False).to(torch.device("cuda"))
+    model.eval().requires_grad_(False).to(device)
     
     # Load tokenizer
     tokenizer = load_tokenizer(args)
