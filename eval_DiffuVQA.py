@@ -206,7 +206,7 @@ if __name__ == '__main__':
 
     if args.filename:
         # If a single file is specified, use it directly
-        files = [ args.folder + "\\" + args.filename]
+        files = [ args.folder + "/" + args.filename]
     else:
         # Otherwise, use all files in the folder
         files = sorted(glob.glob(f"{args.folder}/*jsonl"))
