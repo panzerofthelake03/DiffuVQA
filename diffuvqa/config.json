@@ -15,7 +15,7 @@
   "timestep_respacing": "",
   "vocab": "bert",
   "use_plm_init": "bert",
-  "vocab_size": 30522,
+  "vocab_size": 28996,
   "config_name": "bert-base-uncased",
   "notes": "folder-notes",
   "data_dir": "datasets/Kvasir_VQA",

@@ -17,9 +17,11 @@ class myTokenizer():
     ################################################
     def __init__(self, args):
         if args.vocab == 'bert':
-            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
+
+    
             self.pad_token_id = tokenizer.pad_token_id
             # save
             tokenizer.save_pretrained(args.checkpoint_path)
@@ -145,8 +147,8 @@ def create_model_and_diffusion(args):
         output_dims=768,
         hidden_t_dim=128,
         dropout=0.1,
-        config_name="bert-base-uncased",
-        vocab_size=30522,
+        config_name="dmis-lab/biobert-v1.1",
+        vocab_size=28996,
         init_pretrained="bert",
         args=args
     )

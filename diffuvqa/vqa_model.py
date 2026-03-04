@@ -239,7 +239,7 @@ class TransformerNetModel(nn.Module):
             hidden_t_dim,
             dropout=0,
             config=None,
-            config_name='bert-base-uncased',
+            config_name='dmis-lab/biobert-v1.1',
             vocab_size=None,
             init_pretrained='no',
             logits_mode=1,
