@@ -14,6 +14,78 @@ import os
 from PIL import Image
 
 
+def _resolve_image_path(args, image_name):
+    """Build absolute image path for a dataset entry."""
+    if not image_name:
+        return ''
+    if args.dataset.lower() == 'davekevin':
+        return os.path.join(args.data_dir, 'daveKevin_images', image_name)
+    return os.path.join(args.image_dir, image_name)
+
+
+def _preview_first_samples(args, data_lst, split, max_samples=3):
+    """Render and save a quick preview of the first few question/image pairs."""
+    questions = data_lst.get('question', [])
+    image_names = data_lst.get('image_name', [])
+    answers = data_lst.get('answer', [])
+
+    sample_count = min(max_samples, len(questions), len(image_names))
+    if sample_count <= 0:
+        logger.log('### Preview skipped: no samples available.')
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as e:
+        logger.log(f"Warning: matplotlib unavailable, cannot preview samples: {e}")
+        return
+
+    fig, axes = plt.subplots(1, sample_count, figsize=(5 * sample_count, 5))
+    if sample_count == 1:
+        axes = [axes]
+
+    for i in range(sample_count):
+        img_path = _resolve_image_path(args, image_names[i])
+        try:
+            if img_path and os.path.exists(img_path):
+                img = Image.open(img_path).convert('RGB')
+            else:
+                img = Image.new('RGB', (224, 224), (0, 0, 0))
+        except Exception:
+            img = Image.new('RGB', (224, 224), (0, 0, 0))
+
+        q_text = str(questions[i]) if i < len(questions) else ''
+        a_text = str(answers[i]) if i < len(answers) else ''
+
+        axes[i].imshow(img)
+        axes[i].set_title(f"Q: {q_text[:60]}..." if len(q_text) > 60 else f"Q: {q_text}", fontsize=9, wrap=True)
+        axes[i].text(
+            0.5,
+            -0.15,
+            f"A: {a_text[:60]}..." if len(a_text) > 60 else f"A: {a_text}",
+            transform=axes[i].transAxes,
+            fontsize=8,
+            ha='center',
+            wrap=True,
+        )
+        axes[i].axis('off')
+
+    plt.tight_layout()
+    preview_name = f"{args.dataset}_{split}_first3_preview.png"
+    preview_path = os.path.join(args.data_dir, preview_name)
+    plt.savefig(preview_path, dpi=100, bbox_inches='tight')
+    logger.log(f"### Saved sample preview to {preview_path}")
+
+    # Show non-blocking preview when supported by the runtime backend.
+    try:
+        plt.show(block=False)
+        plt.pause(0.5)
+    except Exception:
+        pass
+    finally:
+        plt.close(fig)
+
+
 def load_data_vqa(
     batch_size, 
     seq_len, 
@@ -217,30 +289,7 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
         logger.log('### Data samples...')
         logger.log(f"questions: {data_lst['question'][:2]} answers: {data_lst['answer'][:2]} images: {data_lst['image_name'][:2]}")
         
-        # Plot first few images with questions and answers
-        try:
-            import matplotlib.pyplot as plt
-            num_samples_to_plot = min(3, len(dataset_split))
-            fig, axes = plt.subplots(1, num_samples_to_plot, figsize=(15, 5))
-            if num_samples_to_plot == 1:
-                axes = [axes]
-            
-            for i in range(num_samples_to_plot):
-                img_path = os.path.join(image_save_dir, f'medvqa_{split}_{i:06d}.png')
-                img = Image.open(img_path).convert('RGB')
-                
-                axes[i].imshow(img)
-                axes[i].set_title(f"Q: {data_lst['question'][i][:40]}...", fontsize=9, wrap=True)
-                axes[i].text(0.5, -0.15, f"A: {data_lst['answer'][i][:40]}...", 
-                           transform=axes[i].transAxes, fontsize=8, ha='center', wrap=True)
-                axes[i].axis('off')
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(args.data_dir, f'daveKevin_samples_{split}.png'), dpi=100, bbox_inches='tight')
-            logger.log(f"### Saved sample visualization to {args.data_dir}/daveKevin_samples_{split}.png")
-            plt.show()
-        except Exception as e:
-            logger.log(f"Warning: Could not plot images: {e}")
+        _preview_first_samples(args, data_lst, split, max_samples=3)
         
         vocab_dict = loaded_vocab
         train_dataset = helper_tokenize(data_lst, vocab_dict, seq_len, split)
@@ -324,6 +373,8 @@ def get_corpus(args, seq_len, split, loaded_vocab=None):
 
     logger.log('### Data samples...')
     logger.log(f"questions: {data_lst['question'][:2]} answers: {data_lst['answer'][:2]} images: {data_lst['image_name'][:2]}")
+
+    _preview_first_samples(args, data_lst, split, max_samples=3)
 
     # Ensure all lists in data_lst have the same length by padding missing entries.
     # This avoids pyarrow/datasets errors if some records lack optional fields like image_name.
