@@ -17,6 +17,7 @@ from PIL import Image
 def _resolve_image_path(args, image_name):
     """Build absolute image path for a dataset entry."""
     if not image_name:
+        logger.log("Warning: empty image_name, using placeholder path")
         return ''
     if args.dataset.lower() == 'davekevin':
         return os.path.join(args.data_dir, 'daveKevin_images', image_name)
@@ -51,6 +52,7 @@ def _preview_first_samples(args, data_lst, split, max_samples=3):
                 logger.log(f"### Loading image for preview: {img_path}")
                 img = Image.open(img_path).convert('RGB')
             else:
+                logger.log("Warning: Image not found, using placeholder.")
                 img = Image.new('RGB', (224, 224), (0, 0, 0))
         except Exception:
             img = Image.new('RGB', (224, 224), (0, 0, 0))
