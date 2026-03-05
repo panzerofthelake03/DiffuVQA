@@ -47,6 +47,7 @@ def _preview_first_samples(args, data_lst, split, max_samples=3):
 
     for i in range(sample_count):
         img_path = _resolve_image_path(args, image_names[i])
+        logger.log(f"Attempted image path: {img_path}")
         try:
             if img_path and os.path.exists(img_path):
                 logger.log(f"### Loading image for preview: {img_path}")
@@ -54,7 +55,8 @@ def _preview_first_samples(args, data_lst, split, max_samples=3):
             else:
                 logger.log("Warning: Image not found, using placeholder.")
                 img = Image.new('RGB', (224, 224), (0, 0, 0))
-        except Exception:
+        except Exception as e:
+            logger.log(f"Error loading image: {e}")
             img = Image.new('RGB', (224, 224), (0, 0, 0))
 
         q_text = str(questions[i]) if i < len(questions) else ''
