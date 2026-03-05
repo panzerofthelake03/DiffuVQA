@@ -48,6 +48,7 @@ def _preview_first_samples(args, data_lst, split, max_samples=3):
         img_path = _resolve_image_path(args, image_names[i])
         try:
             if img_path and os.path.exists(img_path):
+                logger.log(f"### Loading image for preview: {img_path}")
                 img = Image.open(img_path).convert('RGB')
             else:
                 img = Image.new('RGB', (224, 224), (0, 0, 0))
