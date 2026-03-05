@@ -76,10 +76,9 @@ def _preview_first_samples(args, data_lst, split, max_samples=3):
     plt.savefig(preview_path, dpi=100, bbox_inches='tight')
     logger.log(f"### Saved sample preview to {preview_path}")
 
-    # Show non-blocking preview when supported by the runtime backend.
+    # Show preview window so users can see the first samples immediately.
     try:
-        plt.show(block=False)
-        plt.pause(0.5)
+        plt.show()
     except Exception:
         pass
     finally:
