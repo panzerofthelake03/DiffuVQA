@@ -48,6 +48,24 @@ def _preview_first_samples(args, data_lst, split, max_samples=3):
     for i in range(sample_count):
         img_path = _resolve_image_path(args, image_names[i])
         logger.log(f"Attempted image path: {img_path}")
+        parent_dir = os.path.dirname(img_path) if img_path else ''
+        logger.log(f"Parent folder of attempted image path: {parent_dir}")
+        if parent_dir and os.path.isdir(parent_dir):
+            try:
+                parent_items = os.listdir(parent_dir)
+                logger.log(f"Inside parent folder ({parent_dir}): {parent_items[:30]}")
+            except Exception as e:
+                logger.log(f"Could not list parent folder ({parent_dir}): {e}")
+        else:
+            logger.log(f"Parent folder does not exist: {parent_dir}")
+
+        if img_path and os.path.isdir(img_path):
+            try:
+                image_path_items = os.listdir(img_path)
+                logger.log(f"Inside image_path directory ({img_path}): {image_path_items[:30]}")
+            except Exception as e:
+                logger.log(f"Could not list image_path directory ({img_path}): {e}")
+        
         try:
             if img_path and os.path.exists(img_path):
                 logger.log(f"### Loading image for preview: {img_path}")
