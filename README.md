@@ -77,6 +77,31 @@ You need to specify the folder of decoded texts. This folder should contain the 
 cd scripts
 python eval_DiffuVQA.py --folder ../{your-path-to-outputs} --mbr
 ```
+
+## Vector Comparison: Real Image vs Black Replica
+
+To measure the effect of image content on fused multimodal vectors, run:
+
+```bash
+python scripts/compare_image_black_vectors.py \
+	--model_path diffuvqa/config/ema_0.9999_125000.pt \
+	--split test \
+	--batch_size 8 \
+	--max_samples 200 \
+	--out_jsonl outputs/vector_compare_real_vs_black.jsonl \
+	--out_pt outputs/vector_compare_real_vs_black.pt
+```
+
+Each JSONL row includes:
+- `question`
+- `image_path`
+- `cosine_similarity` between `(question + real image)` and `(question + black image)` fused vectors
+- `l2_distance` and vector norm diagnostics
+
+Interpretation:
+- lower `cosine_similarity` means real image content changes the fused vector more
+- higher `l2_distance` means stronger image contribution to the combined representation
+
 Yakışıklılar.
 
 Selam Barış
