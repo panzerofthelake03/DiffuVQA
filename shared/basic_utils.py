@@ -17,7 +17,7 @@ class myTokenizer():
     ################################################
     def __init__(self, args):
         if args.vocab == 'bert':
-            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
+            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
@@ -149,6 +149,18 @@ def create_model_and_diffusion(args):
         model = TransformerNet(args=args)
 
     elif args.model == 'transformer-bert':
+        model =  TransformerNetModel(
+        input_dims=768,
+        output_dims=768,
+        hidden_t_dim=128,
+        dropout=0.1,
+        config_name="bert-base-uncased",
+        vocab_size=30522,
+        init_pretrained="bert",
+        args=args
+    )
+        
+    elif args.model == 'transformer-bio-bert':
         model =  TransformerNetModel(
         input_dims=768,
         output_dims=768,
