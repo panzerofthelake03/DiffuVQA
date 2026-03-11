@@ -20,12 +20,19 @@ class myTokenizer():
             tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
-
-    
             self.pad_token_id = tokenizer.pad_token_id
             # save
             tokenizer.save_pretrained(args.checkpoint_path)
             print('save tokenizer to', args.checkpoint_path)
+            
+        elif args.vocab == 'bio-bert':
+            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
+            self.tokenizer = tokenizer
+            self.sep_token_id = tokenizer.sep_token_id
+            self.pad_token_id = tokenizer.pad_token_id
+            tokenizer.save_pretrained(args.checkpoint_path)
+            print('save tokenizer to', args.checkpoint_path)
+        
         elif args.vocab == 'roberta':
             # Load RoBERTa tokenizer
             tokenizer = AutoTokenizer.from_pretrained("roberta-large")
