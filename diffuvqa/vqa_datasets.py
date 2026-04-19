@@ -466,7 +466,11 @@ class ImageDataset(Dataset):
         for image_name in self.data_lst['image_name']:
             # For daveKevin dataset, images are stored in subdirectory
             if self.args.dataset == 'daveKevin':
-                image_path.append(f'{self.args.data_dir}/daveKevin_images/{image_name}')
+                
+                if self.args.image_dir:
+                    image_path.append(f'{self.args.image_dir}/{image_name}')
+                else:
+                    image_path.append(f'{self.args.data_dir}/daveKevin_images/{image_name}')
             else:
                 image_path.append(f'{self.image_root}/{image_name}')
         return image_path
