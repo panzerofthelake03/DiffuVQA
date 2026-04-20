@@ -93,7 +93,7 @@ class TrainLoop:
         if self.resume_step:
             # self._load_optimizer_state()
             frac_done = (self.step + self.resume_step) / self.learning_steps
-            lr = self.lr * (1 - frac_done)
+            lr = self.lr * max(1 - frac_done, 0.1)
             self.opt = AdamW(self.master_params, lr=lr, weight_decay=self.weight_decay)
             # Model was resumed, either due to a restart or a checkpoint
             # being specified at the command line.
@@ -239,38 +239,24 @@ class TrainLoop:
     def forward_only(self, image, cond):
         with th.no_grad():
             zero_grad(self.model_params)
-            for i in range(0, image.shape[0], self.microbatch):
-                image = image[i: i + self.microbatch].to(dist_util.dev())
-                del cond['image_name']
-                cond = {
-                    k: v[i: i + self.microbatch].to(dist_util.dev())
-                    for k, v in cond.items()
-                }
-                last_batch = (i + self.microbatch) >= image.shape[0]
-                # image = image.to(dist_util.dev())
-                # del cond['qid']
-                # del cond['img_id']
+            cond.pop('image_name', None)
+            orig_image = image
+            orig_cond = cond
+            for i in range(0, orig_image.shape[0], self.microbatch):
+                micro_image = orig_image[i: i + self.microbatch].to(dist_util.dev())
                 micro_cond = {
-                    k: v.to(dist_util.dev())
-                    for k, v in cond.items()
+                    k: v[i: i + self.microbatch].to(dist_util.dev())
+                    for k, v in orig_cond.items()
                 }
-                # last_batch = (i + self.microbatch) >= image.shape[0]
-                t, weights = self.schedule_sampler.sample(image.shape[0], dist_util.dev())
-                # print(micro_cond.keys())
+                t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
                 compute_losses = functools.partial(
                     self.diffusion.training_losses,
                     self.ddp_model,
-                    image,
+                    micro_image,
                     t,
-                    model_kwargs=cond,
-
+                    model_kwargs=micro_cond,
                 )
-
-                # if last_batch or not self.use_ddp:
                 losses = compute_losses()
-                # else:
-                #     with self.ddp_model.no_sync():
-                #         losses = compute_losses()
                 loss = (losses["loss"] * weights).mean()
                 self.last_loss = float(loss.detach().item())
                 log_loss_dict(
@@ -281,42 +267,40 @@ class TrainLoop:
 
     def forward_backward(self, image, cond):
         zero_grad(self.model_params)
-        for i in range(0, image.shape[0], self.microbatch):
-            image = image[i: i + self.microbatch].to(dist_util.dev())
-            del cond['image_name']
-            cond = {
+        cond.pop('image_name', None)
+        orig_image = image
+        orig_cond = cond
+        for i in range(0, orig_image.shape[0], self.microbatch):
+            micro_image = orig_image[i: i + self.microbatch].to(dist_util.dev())
+            micro_cond = {
                 k: v[i: i + self.microbatch].to(dist_util.dev())
-                for k, v in cond.items()
+                for k, v in orig_cond.items()
             }
-            t, weights = self.schedule_sampler.sample(image.shape[0], dist_util.dev())
+            t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
                 self.ddp_model,
-                image,
+                micro_image,
                 t,
-                model_kwargs=cond,
+                model_kwargs=micro_cond,
             )
 
             losses = compute_losses()
-            # else:
-            #     with self.ddp_model.no_sync():
-            #         losses = compute_losses()
+            if isinstance(self.schedule_sampler, LossAwareSampler):
+                self.schedule_sampler.update_with_local_losses(
+                    t, losses["loss"].detach()
+                )
 
-        if isinstance(self.schedule_sampler, LossAwareSampler):
-            self.schedule_sampler.update_with_local_losses(
-                t, losses["loss"].detach()
+            loss = (losses["loss"] * weights).mean()
+            self.last_loss = float(loss.detach().item())
+            log_loss_dict(
+                self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
-
-        loss = (losses["loss"] * weights).mean()
-        self.last_loss = float(loss.detach().item())
-        log_loss_dict(
-            self.diffusion, t, {k: v * weights for k, v in losses.items()}
-        )
-        if self.use_fp16:
-            loss_scale = 2 ** self.lg_loss_scale
-            (loss * loss_scale).backward()
-        else:
-            loss.backward()
+            if self.use_fp16:
+                loss_scale = 2 ** self.lg_loss_scale
+                (loss * loss_scale).backward()
+            else:
+                loss.backward()
 
     def optimize_fp16(self):
         if any(not th.isfinite(p.grad).all() for p in self.model_params):
@@ -378,7 +362,7 @@ class TrainLoop:
         if not self.learning_steps:
             return
         frac_done = (self.step + self.resume_step) / self.learning_steps
-        lr = self.lr * (1 - frac_done)
+        lr = self.lr * max(1 - frac_done, 0.1)
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
 
@@ -397,7 +381,7 @@ class TrainLoop:
                 filename = f"model{(self.step + self.resume_step):06d}.pt"
             else:
                 filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
-            logger.log(f"writing to {bf.join(get_blob_logdir(), filename)}")
+            logger.log(f"writing to {os.path.join(get_blob_logdir(), filename)}")
             logger.log(f"writing to {bf.join(self.checkpoint_path, filename)}")
             # with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
             #     th.save(state_dict, f)

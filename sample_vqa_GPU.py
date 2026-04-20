@@ -292,7 +292,7 @@ def main():
 
             sample_fn = (diffusion.p_sample_loop if not args.use_ddim else diffusion.ddim_sample_loop)
 
-            sample_shape = (x_start.shape[0], args.seq_len, args.hidden_dim)
+            sample_shape = tuple(x_start.shape)
 
             # The diffusion sampling procedure prints progress using carriage returns
             # which causes the terminal to repeatedly overwrite the same lines on

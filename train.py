@@ -48,7 +48,7 @@ def main():
     args = create_argparser().parse_args()
     set_seed(args.seed)
     
-    # dist_util.setup_dist()
+    dist_util.setup_dist()
     logger.configure()
     logger.log("### Creating data loader...")
     start_t = time.time()
@@ -107,7 +107,7 @@ def main():
         diffusion=diffusion,
         data=data,
         batch_size=args.batch_size,
-        microbatch=0,
+        microbatch=args.microbatch,
         lr=args.lr,
         ema_rate=args.ema_rate,
         log_interval=args.log_interval,
