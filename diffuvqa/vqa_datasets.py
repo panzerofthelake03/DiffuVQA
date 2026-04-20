@@ -573,7 +573,7 @@ if __name__ == "__main__":
 
     data = load_data_vqa(batch_size=args.batch_size, seq_len=args.seq_len, args=args, model_emb=model_emb,
                             transform=transform, split='train', loaded_vocab=tokenizer)
-    image, cond = next(data)
+    image, cond = next(iter(data))
 
     print(image, image.shape)
     print(cond['input_q_id'], cond['input_q_id'].shape  )
