@@ -252,11 +252,15 @@ def main():
             # debug: fuse_feats.shape suppressed to avoid noisy stdout
             x_start = torch.cat([fuse_feats, input_emb], dim=1)
 
-            # Build a full mask that covers the image-fuse tokens (zeros) + text tokens (input_ids_mask)
+            # Build generation mask aligned with x_start = [fuse | answer].
+            # Keep fuse region fixed (0) and diffuse answer region (1).
             fuse_len = fuse_feats.size(1)
             bsz = input_ids_mask.size(0)
-            fuse_mask = th.zeros((bsz, fuse_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device)
-            full_mask = th.cat([fuse_mask, input_ids_mask], dim=1)
+            answer_len = input_emb.size(1)
+            full_mask = th.cat([
+                th.zeros((bsz, fuse_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device),
+                th.ones((bsz, answer_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device),
+            ], dim=1)
 
             # Ensure full_mask length matches x_start sequence length; pad or truncate as needed
             total_len = x_start.size(1)
