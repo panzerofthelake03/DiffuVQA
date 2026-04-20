@@ -14,7 +14,7 @@ from tqdm import tqdm
 import time
 
 # Import DiffuVQA modules
-from basic_utils import (
+from shared.basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     add_dict_to_argparser,

@@ -17,7 +17,7 @@ from torchvision.transforms import transforms
 from transformers import set_seed
 from diffuvqa.rounding import denoised_fn_round, get_efficient_knn
 from diffuvqa.vqa_datasets import load_data_vqa
-from excel_export_module import record_sampling_data
+from shared.excel_export_module import record_sampling_data
 from datetime import datetime
 
 # from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
@@ -28,7 +28,7 @@ import sys
 import contextlib
 from diffuvqa.utils import dist_util, logger
 from functools import partial
-from basic_utils import (
+from shared.basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     add_dict_to_argparser,

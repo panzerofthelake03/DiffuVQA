@@ -9,7 +9,7 @@ args = A()
 args.dataset = 'qqp'
 args.data_dir = r'C:\Users\BARIS\Documents\GitHub\DiffuVQA\datasets'
 # Prepare a tokenizer instance (loaded_vocab) so helper_tokenize has a tokenizer
-from basic_utils import load_tokenizer
+from shared.basic_utils import load_tokenizer
 args.vocab = 'bert'
 args.checkpoint_path = 'diffuvqa/config'
 print('attempting to load corpus...')

@@ -11,7 +11,7 @@ import numpy as np
 from diffuvqa.utils import dist_util, logger
 from diffuvqa.vqa_datasets import load_data_vqa
 from diffuvqa.step_sample import create_named_schedule_sampler
-from basic_utils import (
+from shared.basic_utils import (
     load_defaults_config,
     create_model_and_diffusion,
     args_to_dict,
@@ -19,14 +19,14 @@ from basic_utils import (
     load_model_emb,
     load_tokenizer
 )
-from train_util import TrainLoop
+from shared.train_util import TrainLoop
 from transformers import set_seed
 import wandb
 
 import sys
 import os
 from torchvision import transforms
-from excel_export_module import DiffuVQAExcelExporter
+from shared.excel_export_module import DiffuVQAExcelExporter
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
