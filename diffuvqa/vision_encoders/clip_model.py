@@ -265,13 +265,13 @@ def build_model(name, resolution_after=128, jit=False):
         raise RuntimeError(f"Model {name} not found; available models = {available_models()}"
                            )
     try:
-        model = torch.jit.load(model_path, map_location="cuda")
+        model = torch.jit.load(model_path, map_location="cpu")
         state_dict = None
     except RuntimeError:
         if jit:
             warnings.warn(f"File {model_path} is not a JIT archive. Loading as a state dict instead")
             jit = False
-        state_dict = torch.load(model_path, map_location="cuda")
+        state_dict = torch.load(model_path, map_location="cpu", weights_only=False)
     state_dict = state_dict or model.state_dict()
 
     vit = "visual.proj" in state_dict
