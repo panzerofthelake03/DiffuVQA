@@ -1,0 +1,22 @@
+2026-04-20 20:07:34,029 INFO    MainThread:12280 [wandb_setup.py:_flush():81] Current SDK version is 0.26.0
+2026-04-20 20:07:34,029 INFO    MainThread:12280 [wandb_setup.py:_flush():81] Configure stats pid to 12280
+2026-04-20 20:07:34,030 INFO    MainThread:12280 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2026-04-20 20:07:34,030 INFO    MainThread:12280 [wandb_init.py:setup_run_log_directory():721] Logging user logs to C:\Users\BARIS\Documents\GitHub\DiffuVQA\wandb\offline-run-20260420_200734-juv4nr0e\logs\debug.log
+2026-04-20 20:07:34,031 INFO    MainThread:12280 [wandb_init.py:setup_run_log_directory():722] Logging internal logs to C:\Users\BARIS\Documents\GitHub\DiffuVQA\wandb\offline-run-20260420_200734-juv4nr0e\logs\debug-internal.log
+2026-04-20 20:07:34,032 INFO    MainThread:12280 [wandb_init.py:init():848] calling init triggers
+2026-04-20 20:07:34,032 INFO    MainThread:12280 [wandb_init.py:init():853] wandb.init called with sweep_config: {}
+config: {'_wandb': {}}
+2026-04-20 20:07:34,032 INFO    MainThread:12280 [wandb_init.py:init():896] starting backend
+2026-04-20 20:07:36,770 INFO    MainThread:12280 [wandb_init.py:init():911] sending inform_init request
+2026-04-20 20:07:36,968 INFO    MainThread:12280 [wandb_init.py:init():919] backend started and connected
+2026-04-20 20:07:36,969 INFO    MainThread:12280 [wandb_init.py:init():989] updated telemetry
+2026-04-20 20:07:37,099 INFO    MainThread:12280 [wandb_init.py:init():1013] communicating run to backend with 90.0 second timeout
+2026-04-20 20:07:39,080 INFO    MainThread:12280 [wandb_init.py:init():1058] starting run threads in backend
+2026-04-20 20:07:39,360 INFO    MainThread:12280 [wandb_run.py:_console_start():2542] atexit reg
+2026-04-20 20:07:39,360 INFO    MainThread:12280 [wandb_run.py:_redirect():2391] redirect: wrap_raw
+2026-04-20 20:07:39,361 INFO    MainThread:12280 [wandb_run.py:_redirect():2460] Wrapping output streams.
+2026-04-20 20:07:39,361 INFO    MainThread:12280 [wandb_run.py:_redirect():2483] Redirects installed.
+2026-04-20 20:07:39,380 INFO    MainThread:12280 [wandb_init.py:init():1098] run started, returning control to user process
+2026-04-20 20:07:39,381 INFO    MainThread:12280 [wandb_run.py:_config_callback():1403] config_cb None None {'lr': 1e-05, 'batch_size': 1, 'learning_steps': 1, 'microbatch': 1, 'log_interval': 1, 'save_interval': 1, 'eval_interval': 1000, 'valid': True, 'ema_rate': '0.9999', 'resume_checkpoint': 'none', 'schedule_sampler': 'lossaware', 'diffusion_steps': 2500, 'noise_schedule': 'sqrt', 'timestep_respacing': [2500], 'vocab': 'bert', 'use_plm_init': 'bert', 'vocab_size': 30522, 'config_name': 'bert-base-uncased', 'notes': 'folder-notes', 'data_dir': 'datasets', 'dataset': 'slake', 'image_dir': 'img', 'checkpoint_path': 'diffuvqa/config', 'image_encoder': 'ViT-B/32', 'image_resolution': 384, 'model_path': 'diffuvqa/config/ema_0.9999_125000.pt', 'input_dims': 128, 'seq_len': 32, 'hidden_t_dim': 768, 'hidden_v_dim': 768, 'hidden_dim': 768, 'hidden_size': 768, 'extend_hidden_size': 1024, 'output_dims': 512, 'total_answers_num': 557, 'dropout': 0.2, 'use_fp16': False, 'fp16_scale_growth': 0.001, 'seed': 102, 'gradient_clipping': 0.5, 'weight_decay': 0.0, 'learn_sigma': False, 'use_kl': False, 'predict_xstart': True, 'rescale_timesteps': True, 'rescale_learned_sigmas': False, 'use_resnet152': False, 'sigma_small': False, 'emb_scale_factor': 1.0, 'input_text_embed_size': 768, 'input_image_embed_size': 768, 'language_encoder_name': 'bert-base-uncased', 'num_heads': 8, 'num_layers': 6, 'd_model': 768, 'num_encoder_layers': 6, 'num_top_layer': 6, 'dim_feedforward': 2048, 'feature_size': 768, 'model': 'transformer-bert', 'mlp_ratio': 4}
+2026-04-20 20:07:57,607 INFO    wandb-AsyncioManager-main:12280 [service_client.py:_forward_responses():134] Reached EOF.
+2026-04-20 20:07:57,607 INFO    wandb-AsyncioManager-main:12280 [mailbox.py:close():155] Closing mailbox, abandoning 0 handles.
