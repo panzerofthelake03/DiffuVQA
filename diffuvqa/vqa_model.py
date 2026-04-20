@@ -405,6 +405,47 @@ class TransformerNetModel(nn.Module):
             del temp_bert.embeddings
             del temp_bert.pooler
 
+        elif init_pretrained == 'roberta':
+            print('initializing from pretrained RoBERTa...')
+            print(config)
+
+            temp_roberta = RobertaModel.from_pretrained(config_name, config=config)
+
+            self.word_embedding = temp_roberta.embeddings.word_embeddings
+            try:
+                roberta_emb_dim = self.word_embedding.weight.size(1)
+                target_dim = self.hidden_size
+                if roberta_emb_dim != target_dim:
+                    self.word_embedding_proj = nn.Linear(roberta_emb_dim, target_dim)
+                    self.word_embedding_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.word_embedding_proj.bias is not None:
+                        self.word_embedding_proj.bias.data.zero_()
+            except Exception:
+                pass
+            self.fuse = feature_fusion(self.word_embedding, temp_roberta, args)
+
+            with th.no_grad():
+                self.lm_head.weight = self.word_embedding.weight
+
+            self.input_transformers = temp_roberta.encoder
+            self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+            self.position_embeddings = temp_roberta.embeddings.position_embeddings
+            self.LayerNorm = temp_roberta.embeddings.LayerNorm
+
+            try:
+                pos_dim = self.position_embeddings.weight.size(1)
+                target_dim = self.hidden_size
+                if pos_dim != target_dim:
+                    self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
+                    self.position_embeddings_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.position_embeddings_proj.bias is not None:
+                        self.position_embeddings_proj.bias.data.zero_()
+            except Exception:
+                pass
+
+            del temp_roberta.embeddings
+            del temp_roberta.pooler
+
         elif init_pretrained == 'no':
             self.input_transformers = BertEncoder(config)
 

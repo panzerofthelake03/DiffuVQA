@@ -73,18 +73,17 @@ def main():
 
     args = create_argparser().parse_args()
 
-    # Debug: Print the parsed model_path
-    print(f"DEBUG: Parsed model_path = {args.model_path}")
+    logger.configure()
+    logger.log(f"DEBUG: Parsed model_path = {args.model_path}")
 
     # Backwards-compatibility: some older training runs don't record newer flags.
     if not hasattr(args, 'use_noising_f'):
         args.use_noising_f = False
 
-    logger.configure()
-    print("### Loading model from", args.model_path)
+    logger.log("### Loading model from %s" % args.model_path)
     # load configurations.
     config_path = os.path.join(os.path.split(args.model_path)[0], "training_args.json")
-    print(config_path)
+    logger.log(f"config_path: {config_path}")
     with open(config_path, 'rb', ) as f:
         training_args = json.load(f)
 
@@ -99,7 +98,7 @@ def main():
     
     if(original_model_path != ""):
         args.model_path = original_model_path
-    print("### Updated args:", args)
+    logger.log(f"### Updated args: {args}")
 
     if(original_Seed is not None):
         args.seed = original_Seed
@@ -107,7 +106,7 @@ def main():
     if(original_batch_size is not None):
         args.batch_size = original_batch_size
 
-    print(">>> diffusion_steps before:", original_diffusion_step)
+    logger.log(f">>> diffusion_steps before: {original_diffusion_step}")
     if(original_diffusion_step is not None):
         args.step = original_diffusion_step
 

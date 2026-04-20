@@ -33,6 +33,20 @@ class myTokenizer():
             # save
             tokenizer.save_pretrained(args.checkpoint_path)
             print('save PubMedBERT tokenizer to', args.checkpoint_path)
+        elif args.vocab == 'bio-bert':
+            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
+            self.tokenizer = tokenizer
+            self.sep_token_id = tokenizer.sep_token_id
+            self.pad_token_id = tokenizer.pad_token_id
+            tokenizer.save_pretrained(args.checkpoint_path)
+            print('save BioBERT tokenizer to', args.checkpoint_path)
+        elif args.vocab == 'roberta':
+            tokenizer = AutoTokenizer.from_pretrained("roberta-large")
+            self.tokenizer = tokenizer
+            self.sep_token_id = tokenizer.sep_token_id
+            self.pad_token_id = tokenizer.pad_token_id
+            tokenizer.save_pretrained(args.checkpoint_path)
+            print('save RoBERTa tokenizer to', args.checkpoint_path)
         else: 
             # load vocab from the path
             print('#'*30, 'load vocab from', args.vocab)
@@ -85,7 +99,17 @@ def load_model_emb(args, tokenizer):
 
     if os.path.exists(path_save):
         print('reload the random embeddings', model)
-        model.load_state_dict(torch.load(path_save))
+        try:
+            model.load_state_dict(torch.load(path_save))
+        except RuntimeError as e:
+            if "size mismatch" in str(e):
+                print(f"Warning: Embedding size mismatch. Reinitializing embeddings.")
+                print(f"  Current tokenizer vocab size: {tokenizer.vocab_size}")
+                torch.nn.init.normal_(model.weight)
+                torch.save(model.state_dict(), path_save)
+                print(f"  Saved new embeddings to {path_save}")
+            else:
+                raise e
     else:
         print('initializing the random embeddings', model)
         torch.nn.init.normal_(model.weight)
@@ -128,13 +152,19 @@ def create_model_and_diffusion(args):
         model = TransformerNet(args=args)
 
     elif args.model == 'transformer-bert':
-        # config_name ve init_pretrained'i args'tan al
-        _plm = getattr(args, 'use_plm_init', 'bert')
+        # Derive PLM from use_plm_init; fall back to vocab if not explicitly set
+        _plm = getattr(args, 'use_plm_init', None)
+        if not _plm or _plm not in ('bert', 'pubmedbert'):
+            _vocab = getattr(args, 'vocab', 'bert')
+            if _vocab == 'pubmedbert':
+                _plm = 'pubmedbert'
+            else:
+                _plm = 'bert'
         if _plm == 'pubmedbert':
             _config_name = 'NeuML/pubmedbert-base-embeddings'
         else:
             _config_name = 'bert-base-uncased'
-            _plm = 'bert'  # 'no' veya başka değer geldiyse bert'e düşür
+            _plm = 'bert'
 
         model = TransformerNetModel(
             input_dims=args.hidden_dim,
@@ -144,6 +174,42 @@ def create_model_and_diffusion(args):
             config_name=_config_name,
             vocab_size=args.vocab_size,
             init_pretrained=_plm,
+            args=args
+        )
+
+    elif args.model == 'transformer-pubmedbert':
+        model = TransformerNetModel(
+            input_dims=768,
+            output_dims=768,
+            hidden_t_dim=128,
+            dropout=0.1,
+            config_name='NeuML/pubmedbert-base-embeddings',
+            vocab_size=30522,
+            init_pretrained='pubmedbert',
+            args=args
+        )
+
+    elif args.model == 'transformer-bio-bert':
+        model = TransformerNetModel(
+            input_dims=768,
+            output_dims=768,
+            hidden_t_dim=128,
+            dropout=0.1,
+            config_name='dmis-lab/biobert-v1.1',
+            vocab_size=28996,
+            init_pretrained='bert',
+            args=args
+        )
+
+    elif args.model == 'transformer-roberta':
+        model = TransformerNetModel(
+            input_dims=1024,
+            output_dims=1024,
+            hidden_t_dim=128,
+            dropout=0.1,
+            config_name='roberta-large',
+            vocab_size=50265,
+            init_pretrained='roberta',
             args=args
         )
 
