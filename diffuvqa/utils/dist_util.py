@@ -48,7 +48,11 @@ def dev():
     Get the device to use for torch.distributed.
     """
     if th.cuda.is_available():
-        return th.device("cuda")
+        try:
+            local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        except (TypeError, ValueError):
+            local_rank = 0
+        return th.device(f"cuda:{local_rank}")
     return th.device("cpu")
 
 
