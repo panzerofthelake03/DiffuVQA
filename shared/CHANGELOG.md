@@ -15,6 +15,23 @@ Update protocol:
 
 ## [Unreleased]
 
+### 2026-04-20 - Phase 1 - Stabilization Progress
+
+- Type: Fixed
+  - Fixed training microbatch behavior and moved per-microbatch training updates to the correct loop in [shared/train_util.py](shared/train_util.py).
+  - Restored distributed setup call and microbatch argument wiring in [train.py](train.py).
+  - Fixed sample tensor shape and conditional mask behavior in [sample_vqa_GPU.py](sample_vqa_GPU.py).
+  - Fixed DataLoader iteration in module smoke test path in [diffuvqa/vqa_datasets.py](diffuvqa/vqa_datasets.py).
+  - Fixed CUDA device selection to use indexed device (e.g., cuda:0) in [diffuvqa/utils/dist_util.py](diffuvqa/utils/dist_util.py) for Colab compatibility.
+
+- Type: Validation
+  - Verified mask behavior via smoke test: legacy path no-ops, patched path performs diffusion updates.
+  - Verified training startup and progression on Colab after device fix (Cell 11 now trains successfully).
+  - Verified vqa_datasets module smoke test runs past tokenization after DataLoader iterator fix.
+
+- Type: Decision
+  - Kept Phase 1 status as In Progress until an uninterrupted 5,000-step run and final checkpoint export are complete.
+
 ### 2026-04-19 - Phase 0 - Planning Baseline
 
 - Type: Added

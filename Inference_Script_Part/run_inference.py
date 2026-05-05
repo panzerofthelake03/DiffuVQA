@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict
+from pathlib import Path
 
 
 def parse_args():
@@ -33,7 +34,14 @@ def main():
     args = parse_args()
 
     # Import lazily so `--help` works even when heavy runtime deps are absent.
-    from Inference_Script_Part.pipeline import DiffuVQAInferencePipeline
+    if __package__:
+        from .pipeline import DiffuVQAInferencePipeline
+    else:
+        repo_root = Path(__file__).resolve().parent.parent
+        repo_root_str = str(repo_root)
+        if repo_root_str not in sys.path:
+            sys.path.insert(0, repo_root_str)
+        from Inference_Script_Part.pipeline import DiffuVQAInferencePipeline
 
     pipeline = DiffuVQAInferencePipeline(
         checkpoint_path=args.checkpoint,

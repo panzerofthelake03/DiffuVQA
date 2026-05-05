@@ -11,16 +11,16 @@ Update rule:
 
 Status: In Progress
 
-- [ ] Task 1.1 Training environment setup
-- [ ] Install and verify dependencies
-- [ ] Configure hyperparameters for baseline run
-- [ ] Prepare data loaders for medical image-text pairs
-- [ ] Verify GPU and memory setup
-- [ ] Configure logging and checkpoint output directory
+- [x] Task 1.1 Training environment setup
+- [x] Install and verify dependencies
+- [x] Configure hyperparameters for baseline run
+- [x] Prepare data loaders for medical image-text pairs
+- [x] Verify GPU and memory setup
+- [x] Configure logging and checkpoint output directory
 
 - [ ] Task 1.2 Model execution for exactly 5,000 global steps
-- [ ] Start baseline training run
-- [ ] Monitor loss and validation metrics
+- [x] Start baseline training run
+- [x] Monitor loss and validation metrics
 - [ ] Save intermediate checkpoints (target cadence: every 500 steps)
 - [ ] Confirm run completes without OOM or runtime failure
 
@@ -32,7 +32,13 @@ Status: In Progress
 - [ ] Document checkpoint naming and location
 
 Phase 1 Notes:
-- Pending
+- Completed stabilization and smoke-test fixes in training/inference path:
+- Fixed microbatch and loss-backprop flow issues in shared/train_util.py.
+- Re-enabled distributed initialization and microbatch argument wiring in train.py.
+- Fixed sample shape and conditional mask behavior in sample_vqa_GPU.py.
+- Fixed direct module run issue in diffuvqa/vqa_datasets.py by iterating DataLoader correctly.
+- Fixed Colab CUDA device selection in diffuvqa/utils/dist_util.py (cuda index).
+- Current state: Cell 11 training on Colab runs successfully; 5,000-step full run is still pending.
 
 ## Phase 2: Inference Script Engineering
 

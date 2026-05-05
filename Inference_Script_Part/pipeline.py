@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from argparse import Namespace
 from dataclasses import asdict, dataclass
@@ -62,7 +63,14 @@ class DiffuVQAInferencePipeline:
     @staticmethod
     def _resolve_device(device: Optional[str]) -> torch.device:
         if device:
-            return torch.device(device)
+            requested = torch.device(device)
+            if requested.type == "cuda" and not torch.cuda.is_available():
+                print(
+                    "Warning: CUDA requested but not available; falling back to CPU.",
+                    file=os.sys.stderr,
+                )
+                return torch.device("cpu")
+            return requested
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     @staticmethod
@@ -157,6 +165,56 @@ class DiffuVQAInferencePipeline:
         avg_logprob = float((torch.log(chosen.clamp(min=1e-12)) * valid_mask).sum().item() / valid_count)
         return confidence, avg_logprob
 
+    @staticmethod
+    def _debug_dump_answer_topk(logits: torch.Tensor, chosen: torch.Tensor, pad_token_id: int):
+        if os.environ.get("DVQA_DEBUG_TOPK", "0") != "1":
+            return
+
+        with torch.no_grad():
+            topk_k = min(5, logits.size(-1))
+            topk_vals, topk_ids = torch.topk(logits, k=topk_k, dim=-1)
+            topk_probs = torch.softmax(topk_vals, dim=-1)
+
+            # Quantify collapse strength: margin between pad logit and best non-pad logit
+            # for each answer position. Positive values mean pad is preferred.
+            pad_logits = logits[..., pad_token_id]
+            masked_logits = logits.clone()
+            masked_logits[..., pad_token_id] = float("-inf")
+            best_non_pad_logits, _ = torch.max(masked_logits, dim=-1)
+            pad_margin = (pad_logits - best_non_pad_logits)[0]
+
+            top1 = chosen[0]
+            unique_ids, counts = torch.unique(top1, return_counts=True)
+            id_count_pairs = list(zip(unique_ids.tolist(), counts.tolist()))
+            id_count_pairs.sort(key=lambda x: x[1], reverse=True)
+
+            pos_preview = min(12, topk_ids.size(1))
+            preview = []
+            for pos in range(pos_preview):
+                preview.append(
+                    {
+                        "pos": pos,
+                        "topk_ids": topk_ids[0, pos].tolist(),
+                        "topk_probs": [round(float(x), 6) for x in topk_probs[0, pos].tolist()],
+                    }
+                )
+
+            debug_obj = {
+                "tag": "DVQA_DEBUG_TOPK",
+                "answer_len": int(chosen.size(1)),
+                "pad_token_id": int(pad_token_id),
+                "non_pad_count": int((top1 != pad_token_id).sum().item()),
+                "top1_id_histogram": id_count_pairs[:10],
+                "pad_margin_stats": {
+                    "mean": round(float(pad_margin.mean().item()), 6),
+                    "min": round(float(pad_margin.min().item()), 6),
+                    "max": round(float(pad_margin.max().item()), 6),
+                },
+                "pad_margin_per_pos": [round(float(x), 6) for x in pad_margin.tolist()],
+                "position_preview": preview,
+            }
+            print(json.dumps(debug_obj, ensure_ascii=False), file=os.sys.stderr)
+
     def predict(
         self,
         image_path: str,
@@ -235,9 +293,11 @@ class DiffuVQAInferencePipeline:
             logits = self.model.get_logits(answer_hidden)
             chosen = torch.topk(logits, k=1, dim=-1).indices.squeeze(-1)
 
+            pad_token_id = int(self.tokenizer.pad_token_id)
+            self._debug_dump_answer_topk(logits, chosen, pad_token_id)
+
             answer_text = self._clean_text(self.tokenizer.decode_token(chosen[0].unsqueeze(-1).cpu()))
             confidence, avg_logprob = self._mean_confidence_from_logits(logits, chosen)
-            pad_token_id = int(self.tokenizer.pad_token_id)
             non_pad_mask = (chosen != pad_token_id)
             non_pad_count = int(non_pad_mask.sum().item())
             total_count = int(chosen.numel())
