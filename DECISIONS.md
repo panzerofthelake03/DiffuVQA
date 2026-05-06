@@ -96,5 +96,28 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 
 ---
 
+### [KARAR] `Pooler` sınıfı silindi
+`diffuvqa/vqa_model.py`'daki `Pooler` sınıfı (eski lines 27-37) hiçbir yerde kullanılmıyordu. `CVAE` aktif olarak `feature_fusion` içinde kullanılırken `Pooler` dead code olarak kalmıştı. Kalabalık yaratmaması için silindi.
+
+---
+
+### [KARAR] Validation loop düzeltildi — BUG 6
+**Sorun 1:** `next(self.eval_data)` doğrudan çağrılıyordu. Validation dataseti tükenince `StopIteration` ile eğitim çöküyordu. `eval_iter` ayrı tutulup `StopIteration` yakalanarak yeniden başlatıldı.
+
+**Sorun 2:** `step=0`'da (`0 % eval_interval == 0`) hiçbir eğitim adımı atılmadan validation çalışıyordu. `self.step > 0` koşulu eklendi.
+
+**Sorun 3:** `forward_only` içinde `del cond['image_name']` orijinal batch dict'ini mutate ediyordu. `micro_cond` dict comprehension sırasında `image_name` key'i filtrelenerek kopyalanır hale getirildi.
+
+---
+
+### [KARAR] `sample_vqa_GPU.py` — Bounded slice ile answer_len kontrolü
+**Değişiklik:** Answer segment boyutu artık `args.seq_len` sabitinden değil, `input_ids_a.size(1)` gerçek uzunluğundan alınıyor. `ans_noise`, `ans_mask` ve son slice hepsi `answer_len` ile tanımlanıyor: `sample[:, fuse_len:fuse_len+answer_len, :]`
+
+**Neden:** `fuse_len:` açık uç slice gelecekte segmente ek token eklenmesi durumunda fazla pozisyonu decode'a sokar. Bounded slice `fuse_len:fuse_len+answer_len` her zaman tam olarak üretilen cevap segmentini alır, dışarıya taşmaz.
+
+**Chatbot notu:** Açık uçlu üretim için `answer_len` tanımını değiştirmek gerekir (GT uzunluğu yerine `max_new_tokens` gibi bir üretim limiti). Slice yapısı değişmez, sadece `answer_len`'in kaynağı değişir.
+
+---
+
 ### [ENDİŞE] Data Leakage — Eğitim tarafı hâlâ açık
 Training loop'ta `cond_x_start = [ddpm_input_pre + ans_emb]` yapısı korunuyor. Model loss hesaplanırken cevap embeddinglerini x_start olarak alıyor. Bu, inference'ta pure noise başlatmayla tutarsızlık yaratmaya devam eder. **Kalıcı çözüm için yeniden eğitim şart.**

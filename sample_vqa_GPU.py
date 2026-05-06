@@ -253,13 +253,14 @@ def main():
         fuse_len = fuse_feats.size(1)
         bsz = fuse_feats.size(0)
 
-        ans_noise = th.randn(bsz, args.seq_len, args.hidden_dim, device=device)
+        answer_len = input_ids_a.size(1)
+        ans_noise = th.randn(bsz, answer_len, args.hidden_dim, device=device)
         x_start = torch.cat([fuse_feats, ans_noise], dim=1)
 
         # Mask: 0 = frozen (image fusion tokens), 1 = diffused (answer tokens)
         fuse_mask = th.zeros((bsz, fuse_len), dtype=th.int64, device=device)
-        ans_mask  = th.ones((bsz, args.seq_len), dtype=th.int64, device=device)
-        full_mask  = th.cat([fuse_mask, ans_mask], dim=1)   # [B, fuse_len + seq_len]
+        ans_mask  = th.ones((bsz, answer_len), dtype=th.int64, device=device)
+        full_mask  = th.cat([fuse_mask, ans_mask], dim=1)   # [B, fuse_len + answer_len]
 
         input_ids_mask = th.broadcast_to(full_mask.unsqueeze(dim=-1), x_start.shape).to(device)
 
@@ -304,9 +305,7 @@ def main():
             )
 
         sample = samples[-1]
-        # fuse_len is the number of frozen image-fusion tokens prepended to the
-        # answer tokens. Slice from fuse_len onward to get only answer tokens.
-        sample = sample[:, fuse_len:, :]
+        sample = sample[:, fuse_len:fuse_len + answer_len, :]
     # sample shape suppressed
         logits = model.get_logits(sample)
         cands = th.topk(logits, k=1, dim=-1)

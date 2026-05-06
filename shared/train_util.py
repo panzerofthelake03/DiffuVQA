@@ -176,34 +176,36 @@ class TrainLoop:
         # expects (not the number of epochs). We iterate through the dataset
         # and stop once the requested number of steps is reached.
         data_iter = iter(self.data)
+        eval_iter = iter(self.eval_data) if self.eval_data is not None else None
         from tqdm import tqdm
-        
-        # Create progress bar for training with improved settings
+
         pbar = tqdm(total=self.learning_steps, desc="Training", unit="step",
                    dynamic_ncols=True, smoothing=0.1)
-        pbar.update(self.step)  # Update to current step if resuming
-        
+        pbar.update(self.step)
+
         while (not self.learning_steps) or (self.step < self.learning_steps):
             try:
                 image, cond = next(data_iter)
             except StopIteration:
-                # Recreate the iterator when the dataset is exhausted
                 data_iter = iter(self.data)
                 image, cond = next(data_iter)
 
             self.run_step(image, cond)
-            
-            # Update progress bar with loss info
+
             if hasattr(logger, 'name2val') and 'loss' in logger.name2val:
                 avg_loss = logger.name2val['loss'].mean()
                 pbar.set_postfix({'loss': f'{avg_loss:.4f}'}, refresh=False)
-            
+
             if self.step % self.log_interval == 0:
                 logger.dumpkvs()
-            if self.eval_data is not None and self.step % self.eval_interval == 0:
-                batch_eval, cond_eval = next(self.eval_data)
+            if eval_iter is not None and self.step > 0 and self.step % self.eval_interval == 0:
+                try:
+                    batch_eval, cond_eval = next(eval_iter)
+                except StopIteration:
+                    eval_iter = iter(self.eval_data)
+                    batch_eval, cond_eval = next(eval_iter)
                 self.forward_only(batch_eval, cond_eval)
-                pbar.write(f'📊 Step {self.step}: Eval on validation set')
+                pbar.write(f'Step {self.step}: eval loss logged')
                 logger.dumpkvs()
             if self.step > 0 and self.step % self.save_interval == 0:
                 self.save()
@@ -229,46 +231,27 @@ class TrainLoop:
         self.log_step()
 
     def forward_only(self, image, cond):
-        print(self.batch_size)
         with th.no_grad():
             zero_grad(self.model_params)
             for i in range(0, image.shape[0], self.microbatch):
-                image = image[i: i + self.microbatch].to(dist_util.dev())
-                del cond['image_name']
-                cond = {
+                micro_image = image[i: i + self.microbatch].to(dist_util.dev())
+                micro_cond = {
                     k: v[i: i + self.microbatch].to(dist_util.dev())
                     for k, v in cond.items()
+                    if k != 'image_name'
                 }
-                last_batch = (i + self.microbatch) >= image.shape[0]
-                # image = image.to(dist_util.dev())
-                # del cond['qid']
-                # del cond['img_id']
-                micro_cond = {
-                    k: v.to(dist_util.dev())
-                    for k, v in cond.items()
-                }
-                # last_batch = (i + self.microbatch) >= image.shape[0]
-                t, weights = self.schedule_sampler.sample(image.shape[0], dist_util.dev())
-                # print(micro_cond.keys())
+                t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
                 compute_losses = functools.partial(
                     self.diffusion.training_losses,
                     self.ddp_model,
-                    image,
+                    micro_image,
                     t,
-                    model_kwargs=cond,
-
+                    model_kwargs=micro_cond,
                 )
-
-                # if last_batch or not self.use_ddp:
                 losses = compute_losses()
-                # else:
-                #     with self.ddp_model.no_sync():
-                #         losses = compute_losses()
-                loss = (losses["loss"] * weights).mean()
                 log_loss_dict(
                     self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()}
                 )
-                # Eval loss is logged by logger.logkv_mean
 
     def forward_backward(self, image, cond):
         zero_grad(self.model_params)

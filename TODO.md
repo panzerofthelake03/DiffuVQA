@@ -19,5 +19,7 @@
 - [x] BUG 3: `vqa_model.py` — `feature_fusion` çıktısı her zaman `seq_len` uzunluğunda garantilendi
 - [x] BUG 4: `vqa_model.py` — Hardcoded `145` kanal boyutu dummy forward ile dinamik hesaplamaya çevrildi
 - [x] BUG 5: `gaussian_diffusion.py` — Tanımsız değişkeni referans alan debug print'ler kaldırıldı
+- [x] BUG 6: `train_util.py` — Validation loop 3 hata düzeltildi (StopIteration çökmesi, step=0 erken eval, cond dict mutation)
+- [x] `vqa_model.py` — Kullanılmayan `Pooler` sınıfı silindi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — PubMedBERT + SLAKE test parametreleri güncellendi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Eval hücresi `eval/eval_DiffuVQA.py` yolu ve dinamik dosya adı kullanacak şekilde düzeltildi

@@ -24,19 +24,6 @@ from diffuvqa.utils.answer_pre import find_most_similar_answers
 ##############################################################
 ###########  vision and text feature fusion     #############
 #############################################################
-class Pooler(nn.Module):
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.dense = nn.Linear(hidden_size, hidden_size)
-        self.activation = nn.Tanh()
-
-    def forward(self, hidden_states):
-        first_token_tensor = hidden_states[:, 0]
-        pooled_output = self.dense(first_token_tensor)
-        pooled_output = self.activation(pooled_output)
-        return pooled_output
-
-
 class CVAE(nn.Module):
     def __init__(self, embedding_dim):
         super(CVAE, self).__init__()
