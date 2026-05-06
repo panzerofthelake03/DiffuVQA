@@ -7,6 +7,14 @@ Update rule:
 - Add final notes under the phase Notes section.
 - Add major decisions and deviations to [shared/CHANGELOG.md](shared/CHANGELOG.md) on the same day.
 
+## Engineering Execution Log (2026-05-06)
+
+- [x] Apply training mask alignment fix in diffusion loss path.
+- [x] Apply non-leaky sampling initialization for answer segment.
+- [x] Start decisions and concerns tracking file.
+- [ ] Run a short validation pass for sampling and shape checks.
+- [ ] Compare tiny legacy/fixed behavior after patches.
+
 ## Phase 1: Model Training and Optimization
 
 Status: In Progress

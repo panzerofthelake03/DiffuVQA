@@ -239,7 +239,6 @@ def main():
 
             input_ids_x = cond.pop('input_ids').to(th.device("cuda"))
             input_ids_a = cond.pop('input_a_id').to(th.device("cuda"))
-            input_emb = model.get_embeds(input_ids_a)
 
             # masks and metadata
             input_ids_mask = cond.pop('input_mask').to(th.device("cuda"))
@@ -250,13 +249,18 @@ def main():
             fuse_feats, _ = model.get_ddpm_input(image, cond)
             f = torch.cat([fuse_feats, fuse_feats], dim=1)
             # debug: fuse_feats.shape suppressed to avoid noisy stdout
-            x_start = torch.cat([fuse_feats, input_emb], dim=1)
+            answer_len = input_ids_a.size(1)
+            answer_init = th.zeros(
+                (fuse_feats.size(0), answer_len, fuse_feats.size(-1)),
+                dtype=fuse_feats.dtype,
+                device=fuse_feats.device,
+            )
+            x_start = torch.cat([fuse_feats, answer_init], dim=1)
 
             # Build generation mask aligned with x_start = [fuse | answer].
             # Keep fuse region fixed (0) and diffuse answer region (1).
             fuse_len = fuse_feats.size(1)
             bsz = input_ids_mask.size(0)
-            answer_len = input_emb.size(1)
             full_mask = th.cat([
                 th.zeros((bsz, fuse_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device),
                 th.ones((bsz, answer_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device),

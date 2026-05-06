@@ -610,10 +610,10 @@ class GaussianDiffusion:
         # x_start_fix = x_start # save the orignal x_0
         # x_start_mean, _ = model.model.module.get_ddpm_inputs_mask(image, model_kwargs)
         assert 'input_ids' in model_kwargs
-        input_ids_x = model_kwargs.pop('input_ids').to(t.device)
+        _ = model_kwargs.pop('input_ids').to(t.device)
         input_ids_a = model_kwargs['input_a_id'].to(t.device)
         # x_start_arr = model.model.module.get_embeds(input_ids_x)
-        mask = model_kwargs.pop('input_mask').to(t.device)
+        _ = model_kwargs.pop('input_mask').to(t.device)
 
         # if mask is not None:
         #     input_mask = th.broadcast_to(mask.unsqueeze(dim=-1), x_start_mean.shape)
@@ -667,7 +667,6 @@ class GaussianDiffusion:
                 logger.log(f" x_start: {tuple(x_start.shape)}")
                 logger.log(f" cond_x_start: {tuple(cond_x_start.shape)}")
                 logger.log(f" f (will be set to cond_x_start): {tuple(cond_x_start.shape)}")
-                logger.log(f" mask: {None if mask is None else tuple(mask.shape)}")
                 logger.log(f" t: {None if t is None else tuple(t.shape)}")
         except Exception:
             pass
@@ -688,21 +687,22 @@ class GaussianDiffusion:
             logger.log(f"SHAPE MISMATCH before q_sample: cond_x_start={tuple(cond_x_start.shape)}, f={tuple(f.shape)}, ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start={tuple(x_start.shape)}, x_start_mean={tuple(x_start_mean.shape)}")
             raise RuntimeError("cond_x_start and f have different shapes before q_sample")
 
-        # Ensure mask length matches cond_x_start sequence length by expanding
-        # (repeat mask values for the additional conditional tokens).
-        mask_to_use = mask
-        if mask is not None and mask.shape[1] != cond_x_start.shape[1]:
-            # Repeat/truncate mask to match cond_x_start length
-            repeat_factor = cond_x_start.shape[1] // mask.shape[1]
-            if cond_x_start.shape[1] % mask.shape[1] == 0:
-                mask_to_use = mask.repeat(1, repeat_factor)
-            else:
-                # If not an exact multiple, pad mask with zeros to the right
-                extra = cond_x_start.shape[1] - mask.shape[1]
-                pad = torch.zeros((mask.shape[0], extra), dtype=mask.dtype, device=mask.device)
-                mask_to_use = torch.cat([mask, pad], dim=1)
+        # Build diffusion mask directly in [fuse | answer] space.
+        # 0 keeps fuse tokens fixed, 1 diffuses answer tokens.
+        mask_to_use = th.cat([
+            th.zeros(
+                (cond_x_start.shape[0], ddpm_input_pre.shape[1]),
+                dtype=cond_x_start.dtype,
+                device=cond_x_start.device,
+            ),
+            th.ones(
+                (cond_x_start.shape[0], x_start.shape[1]),
+                dtype=cond_x_start.dtype,
+                device=cond_x_start.device,
+            ),
+        ], dim=1)
 
-        x_t = self.q_sample(cond_x_start, f, t, noise=noise, mask=mask_to_use.to(x_start.device),
+        x_t = self.q_sample(cond_x_start, f, t, noise=noise, mask=mask_to_use,
                             add_information=True)  # reparametrization trick.
 
         get_logits = real_model.get_logits
