@@ -637,30 +637,29 @@ class GaussianDiffusion:
         ddpm_input_pre, ans_emb_pre = real_model.get_ddpm_input(image, model_kwargs)
 
         ans_emb = real_model.get_embeds(input_ids_a)
-        # ans_emb is the TARGET — what the model must learn to generate.
-        # x_start_mean is kept for loss computation (t0_loss, decoder_nll) but
-        # is NOT used as the diffusion input to prevent data leakage.
+        # x_start_mean = clean answer embedding — defines the target manifold for
+        # diffusion. x_start is a noisy sample around this mean (reparametrization).
+        # The model learns to map x_t → x_start_mean (the answer embedding).
+        # Data leakage is prevented by restricting the MSE loss to the answer
+        # segment only (fuse tokens are excluded from the loss, not from x_start).
         x_start_mean = ans_emb
         cond_x_start_mean = torch.cat([ddpm_input_pre, x_start_mean], dim=1)
 
-        # x_start = pure noise, matching inference behaviour.
-        # The model must denoise from random noise to the answer embedding.
-        x_start = th.randn(
-            input_ids_a.shape[0], input_ids_a.shape[1], ddpm_input_pre.shape[2],
-            device=ddpm_input_pre.device
-        )
+        std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod,
+                                   th.tensor([0]).to(x_start_mean.device),
+                                   x_start_mean.shape)
+        x_start = self._get_x_start(x_start_mean, std)
 
         cond_x_start = torch.cat([ddpm_input_pre, x_start], dim=1)
 
         if noise is None:
             noise = th.randn_like(cond_x_start)
 
-        # Use the full conditional start (ddpm_input_pre + x_start) as the
-        # auxiliary information tensor `f` so its shape matches `cond_x_start`.
-        # Previously this duplicated ddpm_input_pre which could produce a
-        # different sequence length and cause shape mismatches during
-        # diffusion sampling.
-        f = cond_x_start
+        # f = clean mean [fuse | ans_emb] — fed into q_sample's add_information
+        # branch so the noise schedule mixes toward the answer manifold, not
+        # toward a noisy x_start. This keeps the learned reverse process anchored
+        # to the answer embedding space.
+        f = cond_x_start_mean
 
         # Sanity check shapes: q_sample expects x_start and f to have identical
         # shapes. If they differ, print detailed diagnostics and raise.

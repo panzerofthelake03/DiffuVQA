@@ -119,13 +119,17 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 
 ---
 
-### [KARAR] Data Leakage tamamen kapatıldı — `gaussian_diffusion.py`
-**Değişiklik:** `training_losses` içinde üç kritik düzeltme yapıldı:
+### [KARAR] Data Leakage kapatıldı — `gaussian_diffusion.py` (revize)
+**Değişiklik:** `training_losses` içinde iki adımda düzeltme yapıldı:
 
-1. `x_start` artık `ans_emb + std*noise` (cevap embedding'i) değil, **pure `th.randn`** — inference ile tam tutarlı.
-2. `target` artık `cond_x_start` (fuse+ans tümü) değil, sadece **`ans_emb` (answer segmenti)**. Fuse tokenları loss'a dahil edilmiyor.
-3. `t0_loss`, `tT_loss`, `decoder_nll` tümü artık `x_start_mean` (ans_emb) üzerinden hesaplanıyor — `x_start` (pure noise) üzerinden değil.
+**Adım 1 (önceki — geri alındı):** `x_start = pure randn`. Inference ile tutarlıydı ama diffusion'un öğrenme hedefini answer manifoldundan kopardı. `q_sample`'ın `add_information` dalı `f` üzerinden sinyal taşısa da `x_t → x_0` ters süreci anlamsız bir random latentten başka bir random latente gitmeyi öğrenebilirdi. Token-space ile latent-space hizalaması zayıflardı.
 
-**Neden:** Model eğitimde hem input hem hedef olarak cevap embeddingini görüyordu. Sadece gürültü temizlemeyi öğreniyor, sıfırdan üretim yapamıyordu. Bu düzeltmeyle training/inference davranışı tamamen hizalandı.
+**Adım 2 (mevcut — doğru):**
+- `x_start = _get_x_start(ans_emb, std)` — cevap embedding + küçük gürültü. Diffusion answer manifolduna bağlı kalır.
+- `f = cond_x_start_mean` — clean `[fuse | ans_emb]`. `q_sample` içindeki `add_information` dalı temiz semantik sinyalle karışım yapar.
+- MSE hedefi sadece answer segmenti: `mean_flat((ans_emb - ans_output)**2)`. Fuse tokenları loss'tan çıkarıldı.
+- `t0_loss`, `tT_loss`, `decoder_nll` tümü `x_start_mean` (ans_emb) üzerinden.
 
-**Etki:** Mevcut checkpoint'ler bu değişiklikle uyumsuz — sıfırdan yeniden eğitim gerekiyor.
+**Neden doğru:** Leakage'ı yaratan şey `x_start`'ın random olmaması değil, `target = cond_x_start` (fuse+ans tümü) olmasıydı. Model hem fuse hem answer'ı yeniden üretmeyi öğreniyordu. Şimdi sadece answer segmentini öğreniyor; fuse tokenlar conditioning olarak kalıyor.
+
+**Etki:** Mevcut checkpoint'ler uyumsuz — sıfırdan yeniden eğitim gerekiyor.
