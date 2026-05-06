@@ -60,3 +60,12 @@
 - Reason: Custom BertEncoder instantiated BertLayer without a local definition, causing NameError risk in non-pretrained init paths.
 - Concern: Transformers internal API paths may change across major versions.
 - Follow-up: If upgrading transformers, verify BertLayer import compatibility and add fallback guard if needed.
+
+### Decision 8: Align diffusion training losses to answer segment semantics
+- File: diffuvqa/gaussian_diffusion.py
+- Change: MSE target now uses only answer segment embeddings (x_start_mean) instead of full [fuse|answer] concat target.
+- Change: t0_loss compares answer prediction against clean answer embeddings.
+- Change: tT_loss and decoder_nll now use x_start_mean (clean answer embeddings), not noisy x_start.
+- Reason: Prevent fuse region from dominating training loss and keep auxiliary regularizers tied to clean answer semantics.
+- Concern: q_sample add_information path still injects auxiliary conditioning and should be monitored for shortcut behavior.
+- Follow-up: Compare short-run metrics (empty rate, exact match trend, answer-token confidence) before/after this change.

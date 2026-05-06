@@ -709,34 +709,44 @@ class GaussianDiffusion:
 
         terms = {}
 
-        target = cond_x_start
         model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
-        assert model_output.shape == target.shape == cond_x_start.shape
-        terms["mse"] = mean_flat((target - model_output) ** 2)
+        assert model_output.shape == cond_x_start.shape
+
+        # Train diffusion prediction only on the answer segment.
+        target_len = x_start_mean.size(1)
+        total_len = model_output.size(1)
+        if target_len > total_len:
+            raise RuntimeError(f"Unexpected sizes: target_len={target_len} > total_len={total_len}")
+        start_idx = total_len - target_len
+        model_output_answer = model_output[:, start_idx:, :]
+        terms["mse"] = mean_flat((x_start_mean - model_output_answer) ** 2)
         # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
         # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
         pre_answer_loss = mean_flat((ans_emb_pre - ans_emb) ** 2)
         # cosine_similarity_loss = mean_flat(1 - F.cosine_similarity(ans_emb_pre, ans_emb, dim=-1))
 
-        cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']  # predicted_xstart = model_output
+        cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']
+        model_out_x_start = cond_model_out_x_start[:, start_idx:, :]
         t0_mask = (t == 0)
-        t0_loss = mean_flat((cond_x_start_mean - cond_model_out_x_start) ** 2)
-        # t0_loss = mean_flat((x_start_mean - cond_model_out_x_start[:, model_output.size(1)//2:, :]) ** 2)
+        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2)
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
         # terms["mse"] = terms["x_mse"] + terms["cond_mse"]
         # tT_mask = (t == self.num_timesteps - 1)
-        out_mean, _, _ = self.q_mean_variance(x_start, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
+        out_mean, _, _ = self.q_mean_variance(
+            x_start_mean,
+            th.LongTensor([self.num_timesteps - 1]).to(x_start_mean.device),
+        )
         tT_loss = mean_flat(out_mean ** 2)
 
-        decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids_a)  # embedding regularization
+        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a)
 
         # The model predicts the concatenated conditional+target sequence. Extract
         # the predicted target portion using the target sequence length rather
         # than assuming it's exactly half of the total length.
-        # Determine target length from x_start (which represents the target tokens).
-        target_len = x_start.size(1)
+        # Determine target length from x_start_mean (clean answer embeddings).
+        target_len = x_start_mean.size(1)
         total_len = cond_model_out_x_start.size(1)
         if target_len > total_len:
             raise RuntimeError(f"Unexpected sizes: target_len={target_len} > total_len={total_len}")

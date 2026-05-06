@@ -23,6 +23,7 @@ Validation snapshot:
 - [x] Clarified in decisions file that current fixed path is non-leaky and leakage flag refers to legacy baseline.
 - [x] Bug 1 fix: sample slicing now uses [fuse_len:fuse_len+answer_len] instead of half split.
 - [x] Bug 2 fix: imported HuggingFace BertLayer to resolve undefined class in custom BertEncoder.
+- [x] Training-loss alignment update: answer-only MSE target and clean-answer based tT/decoder regularization in gaussian_diffusion training path.
 
 ## Phase 1: Model Training and Optimization
 
