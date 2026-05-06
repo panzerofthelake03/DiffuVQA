@@ -2,7 +2,7 @@
 
 ## Aktif Görevler
 
-- [ ] Sıfırdan yeniden eğitim başlat (data leakage kapatıldı, eski checkpoint'ler geçersiz)
+- [ ] Sıfırdan yeniden eğitim başlat — 50k step, diffusion_steps=2000, batch=64, LR=0.000283 (A100)
 - [ ] Chatbot arayüzü tasarla ve implemente et
 
 ## Tamamlanan Görevler
@@ -27,3 +27,7 @@
 - [x] `vqa_model.py` — Kullanılmayan `Pooler` sınıfı silindi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — PubMedBERT + SLAKE test parametreleri güncellendi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Eval hücresi `eval/eval_DiffuVQA.py` yolu ve dinamik dosya adı kullanacak şekilde düzeltildi
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — Sampling hücresinde `ls` path separator hatası düzeltildi (`{FOLDER}*.jsonl` → `{FOLDER}/*.jsonl`)
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — `compare_image_black_vectors` hücresi devre dışı bırakıldı (script repoda yok)
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — 50k step eğitim config: LEARNING_STEPS=50000, DIFFUSION_STEPS=2000, SAMPLE_STEP=200, SAVE_INTERVAL=5000
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — BERTScore LOAD REPORT gürültüsü `warnings` + `logging.disable` ile susturuldu

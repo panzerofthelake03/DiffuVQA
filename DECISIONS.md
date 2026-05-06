@@ -147,3 +147,36 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 **Değişiklik:** `pbar.set_postfix` içindeki `logger.name2val['loss'].mean()` ifadesi `float(logger.get_current().name2val['loss'])` ile değiştirildi.
 
 **Neden:** `name2val` değerleri `float` türünde — `.mean()` metodu yoktu ve sessizce `AttributeError` veriyordu. Tqdm progress bar'ında anlık loss görünmüyordu.
+
+---
+
+### [KARAR] Notebook sampling hücresi — `ls` path separator düzeltildi
+**Değişiklik:** `!ls -lh {SAMPLE_FOLDER}*.jsonl` → `!ls -lh {SAMPLE_FOLDER}/*.jsonl`
+
+**Neden:** Klasör adıyla glob pattern arasında `/` eksikti. Shell bunu `{klasör_adı}*.jsonl` şeklinde aynı dizinde arıyordu ve `No such file or directory` hatası veriyordu.
+
+---
+
+### [KARAR] Notebook — `compare_image_black_vectors` hücresi devre dışı bırakıldı
+**Değişiklik:** Hücre içeriği `scripts.compare_image_black_vectors` modülünü çağırmak yerine bilgilendirici bir mesaj yazdırıyor.
+
+**Neden:** Bu script repoda tanımlı değil — eski bir referans. `ModuleNotFoundError` veriyordu. Asıl eval `eval/eval_DiffuVQA.py` üzerinden yapılıyor.
+
+---
+
+### [KARAR] Notebook — 50k step eğitim konfigürasyonu
+**Değişiklik:**
+- `LEARNING_STEPS`: 6000 → 50000
+- `DIFFUSION_STEPS`: 200 → 2000 (orijinal DiffuSeq konfigürasyonu)
+- `SAMPLE_STEP`: 50 → 200 (DDIM, 2000 adımı 10x hızlandırır)
+- `SAVE_INTERVAL`: 1000 → 5000 (50k'da 10 checkpoint)
+- `LOG_INTERVAL`: 50 → 100
+
+**Neden:** 6000 adım ile avg_nn_l2=416 — model embedding manifoldunu öğrenemedi. SLAKE için minimum 30k-50k adım gerekiyor. A100'de ~8-10 saat.
+
+---
+
+### [KARAR] Notebook eval hücresi — BERTScore LOAD REPORT susturuldu
+**Değişiklik:** `bert_score_fn` çağrısı `warnings.catch_warnings()` + `logging.disable(logging.WARNING)` bloğuna alındı.
+
+**Neden:** `bert_score` kütüphanesi `roberta-large` yüklerken transformers'ın ağırlık uyuşmazlığı loglarını (`lm_head.*` UNEXPECTED, `pooler.*` MISSING) her eval'da terminal'e yazdırıyordu. Bu bir hata değil — BERTScore sadece encoder katmanlarını kullanır. Hangi model seçilirse seçilsin LOAD REPORT çıkar; `model_type` değiştirmek çözmez, logging susturmak gerekir.
