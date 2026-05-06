@@ -12,8 +12,15 @@ Update rule:
 - [x] Apply training mask alignment fix in diffusion loss path.
 - [x] Apply non-leaky sampling initialization for answer segment.
 - [x] Start decisions and concerns tracking file.
-- [ ] Run a short validation pass for sampling and shape checks.
-- [ ] Compare tiny legacy/fixed behavior after patches.
+- [x] Recreate missing mask leakage test script at scripts/test_sampling_mask_leakage.py.
+- [x] Run short validation pass for sampling and shape checks.
+- [x] Compare tiny legacy/fixed behavior after patches.
+
+Validation snapshot:
+- Command: python -m scripts.test_sampling_mask_leakage (cpu, tiny compare)
+- Result: legacy_generation_ratio=0.0, fixed_generation_ratio=1.0, leakage_detected=true (legacy baseline still fails as expected)
+- Tiny e2e: legacy exact_match=1.0, fixed exact_match=0.0 on 4 samples (expected with weak checkpoint under non-leaky setup)
+- [x] Clarified in decisions file that current fixed path is non-leaky and leakage flag refers to legacy baseline.
 
 ## Phase 1: Model Training and Optimization
 

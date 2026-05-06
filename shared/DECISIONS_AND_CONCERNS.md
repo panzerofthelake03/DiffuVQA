@@ -24,3 +24,25 @@
 - Reason: Maintain a single todo checklist for all next actions.
 - Concern: TODO can grow quickly if not pruned after milestone completion.
 - Follow-up: Keep only active and near-term items in execution log and move completed long-term notes to changelog.
+
+### Decision 4: Restore executable mask validation script in repository
+- File: scripts/test_sampling_mask_leakage.py
+- Change: Added test utility file to workspace because runtime invocation failed due to missing script path.
+- Reason: New fuse or answer mask semantics require reproducible validation from repository state.
+- Concern: Script defaults still compare legacy and fixed behavior; users can misread legacy fail as current code fail.
+- Follow-up: Keep using tiny-mode compare only as regression signal and interpret legacy section as baseline reference.
+
+### Decision 5: Validate new fuse|answer semantics with tiny compare run
+- Files: scripts/test_sampling_mask_leakage.py, diffuvqa/gaussian_diffusion.py, sample_vqa_GPU.py
+- Change: Executed module test on cpu with known checkpoint and SLAKE dataset.
+- Result: legacy_generation_ratio=0.0, fixed_generation_ratio=1.0, leakage_detected=true.
+- Result: tiny e2e on 4 samples -> legacy exact_match=1.0, fixed exact_match=0.0.
+- Reason: Confirms mask semantics split is functioning and legacy leakage signature remains detectable.
+- Concern: Fixed exact match remains low on weak checkpoint; this reflects model quality/training stage, not mask wiring failure.
+- Follow-up: Re-evaluate after additional training steps and monitor fixed-mode empty rate plus exact match trend.
+
+### Clarification: Is current implementation leaking answer initialization?
+- Short answer: Current fixed implementation is non-leaky; legacy behavior is leaky.
+- Evidence: In test output, legacy_generation_ratio=0.0 and fixed_generation_ratio=1.0.
+- Interpretation: Legacy mask fails to diffuse the answer region; fixed mask diffuses the full answer region as intended.
+- Important note: leakage_detected=true in the report refers to legacy baseline detection, not a failure of the current fixed path.
