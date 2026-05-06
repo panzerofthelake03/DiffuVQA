@@ -5,8 +5,10 @@ Demonstrates usage of new evaluation metrics with sample data
 """
 
 import json
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
-from enhanced_eval_metrics import EnhancedMetrics
+from eval.enhanced_eval_metrics import EnhancedMetrics
 
 def create_sample_data():
     """Create sample VQA data for testing metrics"""

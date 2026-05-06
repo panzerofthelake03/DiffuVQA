@@ -240,43 +240,33 @@ def main():
 
         input_ids_x = cond.pop('input_ids').to(device)
         input_ids_a = cond.pop('input_a_id').to(device)
-        input_emb = model.get_embeds(input_ids_a)
 
         # masks and metadata
         input_ids_mask = cond.pop('input_mask').to(device)
         input_ids_mask_ori = input_ids_mask.to(th.device("cpu"))
         image_name = cond.pop('image_name')
 
-        # x_start mean prep
+        # x_start: image fusion features + pure noise for answer positions.
+        # We intentionally do NOT use answer embeddings here so the model
+        # must generate the answer from scratch (no data leakage).
         fuse_feats, _ = model.get_ddpm_input(image, cond)
-        f = torch.cat([fuse_feats, fuse_feats], dim=1)
-    # debug: fuse_feats.shape suppressed to avoid noisy stdout
-        x_start = torch.cat([fuse_feats, input_emb], dim=1)
-
-        # Build a full mask that covers the image-fuse tokens (zeros) + text tokens (input_ids_mask)
         fuse_len = fuse_feats.size(1)
-        bsz = input_ids_mask.size(0)
-        fuse_mask = th.zeros((bsz, fuse_len), dtype=input_ids_mask.dtype, device=input_ids_mask.device)
-        full_mask = th.cat([fuse_mask, input_ids_mask], dim=1)
+        bsz = fuse_feats.size(0)
 
-        # Ensure full_mask length matches x_start sequence length; pad or truncate as needed
-        total_len = x_start.size(1)
-        cur_len = full_mask.size(1)
-        if cur_len < total_len:
-            pad_len = total_len - cur_len
-            pad_tensor = th.zeros((bsz, pad_len), dtype=full_mask.dtype, device=full_mask.device)
-            full_mask = th.cat([full_mask, pad_tensor], dim=1)
-        elif cur_len > total_len:
-            full_mask = full_mask[:, :total_len]
+        ans_noise = th.randn(bsz, args.seq_len, args.hidden_dim, device=device)
+        x_start = torch.cat([fuse_feats, ans_noise], dim=1)
+
+        # Mask: 0 = frozen (image fusion tokens), 1 = diffused (answer tokens)
+        fuse_mask = th.zeros((bsz, fuse_len), dtype=th.int64, device=device)
+        ans_mask  = th.ones((bsz, args.seq_len), dtype=th.int64, device=device)
+        full_mask  = th.cat([fuse_mask, ans_mask], dim=1)   # [B, fuse_len + seq_len]
 
         input_ids_mask = th.broadcast_to(full_mask.unsqueeze(dim=-1), x_start.shape).to(device)
 
-        noise = th.randn_like(x_start)
-        if args.use_noising_f:
-            print("noising f")
-            noise = alphas_bar_sqrt[num_steps - 1] * f + one_minus_alphas_bar_sqrt[num_steps - 1] * noise
+        # Start from pure noise everywhere; frozen positions will be restored each step
+        x_noised = th.randn_like(x_start)
 
-        x_noised = th.where(input_ids_mask == 0, x_start, noise)
+        f = x_start  # auxiliary conditioning tensor (same shape as x_start)
 
         model_kwargs = {}
 
@@ -289,7 +279,9 @@ def main():
 
         sample_fn = (diffusion.p_sample_loop if not args.use_ddim else diffusion.ddim_sample_loop)
 
-        sample_shape = (x_start.shape[0], args.seq_len, args.hidden_dim)
+        # sample_shape is used only to extract batch size in p_sample_loop.
+        # The actual sequence shape is determined by x_noised (fuse_len + seq_len).
+        sample_shape = x_start.shape
 
         # The diffusion sampling procedure prints progress using carriage returns
         # which causes the terminal to repeatedly overwrite the same lines on
@@ -312,8 +304,9 @@ def main():
             )
 
         sample = samples[-1]
-        a_shape = sample.size(1) // 2
-        sample = sample[:, a_shape:, :]
+        # fuse_len is the number of frozen image-fusion tokens prepended to the
+        # answer tokens. Slice from fuse_len onward to get only answer tokens.
+        sample = sample[:, fuse_len:, :]
     # sample shape suppressed
         logits = model.get_logits(sample)
         cands = th.topk(logits, k=1, dim=-1)

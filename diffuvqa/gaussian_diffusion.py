@@ -645,30 +645,9 @@ class GaussianDiffusion:
                                    th.tensor([0]).to(x_start_mean.device),
                                    x_start_mean.shape)
 
-        # DEBUG: print shapes to diagnose mismatches in q_sample
-        try:
-            print(f"DEBUG shapes: ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start_mean={tuple(x_start_mean.shape)}, x_start={tuple(x_start.shape)}, cond_x_start={tuple(cond_x_start.shape)}", flush=True)
-        except Exception:
-            pass
-        # print(std.shape, )
-        # x_start_log_var = 2 * th.log(std)
         x_start = self._get_x_start(x_start_mean, std)
 
         cond_x_start = torch.cat([ddpm_input_pre, x_start], dim=1)
-
-        # DEBUG: print shapes to help diagnose mismatches (only if DEBUG_SHAPES env var is set)
-        if os.environ.get('DEBUG_SHAPES', '0') == '1':
-            try:
-                print("DEBUG training_losses_seq2seq shapes:")
-                print(" ddpm_input_pre:", tuple(ddpm_input_pre.shape))
-                print(" x_start_mean:", tuple(x_start_mean.shape))
-                print(" x_start:", tuple(x_start.shape))
-                print(" cond_x_start:", tuple(cond_x_start.shape))
-                print(" f (will be set to cond_x_start):", tuple(cond_x_start.shape))
-                print(" mask:", None if mask is None else tuple(mask.shape))
-                print(" t:", None if t is None else tuple(t.shape))
-            except Exception:
-                pass
 
         if noise is None:
             noise = th.randn_like(cond_x_start)
@@ -686,19 +665,22 @@ class GaussianDiffusion:
             print(f"SHAPE MISMATCH before q_sample: cond_x_start={tuple(cond_x_start.shape)}, f={tuple(f.shape)}, ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start={tuple(x_start.shape)}, x_start_mean={tuple(x_start_mean.shape)}", flush=True)
             raise RuntimeError("cond_x_start and f have different shapes before q_sample")
 
-        # Ensure mask length matches cond_x_start sequence length by expanding
-        # (repeat mask values for the additional conditional tokens).
+        # Align mask with cond_x_start which has shape [B, fuse_len + seq_len].
+        # The original mask covers only answer token positions ([B, seq_len]).
+        # Image-fusion tokens must be frozen (mask=0); answer tokens keep their
+        # original mask values so the diffusion process treats them correctly.
         mask_to_use = mask
         if mask is not None and mask.shape[1] != cond_x_start.shape[1]:
-            # Repeat/truncate mask to match cond_x_start length
-            repeat_factor = cond_x_start.shape[1] // mask.shape[1]
-            if cond_x_start.shape[1] % mask.shape[1] == 0:
-                mask_to_use = mask.repeat(1, repeat_factor)
+            fuse_token_len = cond_x_start.shape[1] - mask.shape[1]
+            if fuse_token_len > 0:
+                # Prepend zeros for image-fusion tokens (frozen, not diffused)
+                fuse_pad = torch.zeros(
+                    (mask.shape[0], fuse_token_len), dtype=mask.dtype, device=mask.device
+                )
+                mask_to_use = torch.cat([fuse_pad, mask], dim=1)
             else:
-                # If not an exact multiple, pad mask with zeros to the right
-                extra = cond_x_start.shape[1] - mask.shape[1]
-                pad = torch.zeros((mask.shape[0], extra), dtype=mask.dtype, device=mask.device)
-                mask_to_use = torch.cat([mask, pad], dim=1)
+                # cond_x_start is shorter than mask — truncate to match
+                mask_to_use = mask[:, :cond_x_start.shape[1]]
 
         x_t = self.q_sample(cond_x_start, f, t, noise=noise, mask=mask_to_use.to(x_start.device),
                             add_information=True)  # reparametrization trick.

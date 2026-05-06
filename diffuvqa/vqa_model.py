@@ -87,12 +87,15 @@ class feature_fusion(nn.Module):
         self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
 
-        # Project raw vision encoder channel features to the configured image embedding size.
-        # Historically this code used 145 as the number of channels produced by
-        # the pretrained CLIP/resnet visual backbone; keep that here for
-        # compatibility with pre-trained weights. If you use a different visual
-        # backbone adjust this number accordingly.
-        self.image_MLP = nn.Linear(145, args.input_image_embed_size)
+        # Dynamically determine the channel dimension produced by the vision encoder
+        # by running a single dummy forward pass. This avoids the hardcoded 145 and
+        # works for any CLIP/ResNet backbone without manual config changes.
+        with torch.no_grad():
+            _dummy = torch.zeros(1, 3, args.image_resolution, args.image_resolution)
+            _out = self.vision_encoder(_dummy)          # [1, C, L]
+            _vision_channels = _out.shape[1]
+
+        self.image_MLP = nn.Linear(_vision_channels, args.input_image_embed_size)
         self.image_MLP.apply(self.init_weights)
 
         # modality type embeddings (0=text,1=image)
@@ -184,26 +187,24 @@ class feature_fusion(nn.Module):
         f3 = self.layer_norm(f3)
         f4 = self.feature_proj(f3)
 
-        # Ensure q_for_image is defined and all tensors have the same sequence length
-        # by pooling-and-expanding the shorter sequences to match image_feats.
-        if 'q_for_image' not in locals():
-            # Create q_for_image by pooling question tokens and expanding to image length
-            if question_feats.size(1) != image_feats.size(1):
-                q_for_image = question_feats.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
-            else:
-                q_for_image = question_feats
+        # Canonical length is question_feats.size(1) == seq_len.
+        # All tensors must be aligned to this length before combining so that
+        # the returned fuse_feats always has shape [B, seq_len, hidden_dim].
+        target_len = question_feats.size(1)
 
-        # If f4 has a different sequence length, pool-and-expand it as well so
-        # the final element-wise combination works without size mismatch.
-        if f4.size(1) != image_feats.size(1):
-            f4 = f4.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
+        # q_for_image: question features projected to target_len (already target_len)
+        q_for_image = question_feats  # [B, target_len, H]
 
-        # Debug print (optional) controlled by environment variable DVQA_DEBUG
-        try:
-            if os.environ.get('DVQA_DEBUG', '0') == '1':
-                print(f"DEBUG feature_fusion shapes: f4 {tuple(f4.shape)}, image_feats {tuple(image_feats.shape)}, q_for_image {tuple(q_for_image.shape)}")
-        except Exception:
-            pass
+        # image_feats: pool to single vector then expand to target_len
+        if image_feats.size(1) != target_len:
+            image_feats = image_feats.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+
+        # f4 comes from cross/multi attention over question tokens — already target_len
+        if f4.size(1) != target_len:
+            f4 = f4.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+
+        assert f4.size(1) == image_feats.size(1) == q_for_image.size(1) == target_len, \
+            f"feature_fusion length mismatch: f4={f4.size(1)}, image={image_feats.size(1)}, q={q_for_image.size(1)}, target={target_len}"
 
         f = self.alpha * f4 + self.beta * image_feats + self.theta * q_for_image
         return f, pre_simu_answer_feats

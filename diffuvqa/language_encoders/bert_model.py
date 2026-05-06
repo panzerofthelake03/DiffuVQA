@@ -135,6 +135,7 @@ except ImportError:
         else:
             return torch.cat(output_chunks, dim=chunk_dim)
 from transformers.models.bert.configuration_bert import BertConfig
+from transformers.models.bert.modeling_bert import BertLayer
 from transformers.utils import logging
 from diffuvqa.utils.init_weights import init_weights
 import copy
