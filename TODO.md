@@ -31,3 +31,4 @@
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — `compare_image_black_vectors` hücresi devre dışı bırakıldı (script repoda yok)
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — 50k step eğitim config: LEARNING_STEPS=50000, DIFFUSION_STEPS=2000, SAMPLE_STEP=200, SAVE_INTERVAL=5000
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — BERTScore LOAD REPORT gürültüsü `warnings` + `logging.disable` ile susturuldu
+- [x] `train.py` — `logger.configure(format_strs=["log", "csv"])` ile stdout tablosu kaldırıldı, tqdm loss satırı korundu

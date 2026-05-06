@@ -180,3 +180,10 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 **Değişiklik:** `bert_score_fn` çağrısı `warnings.catch_warnings()` + `logging.disable(logging.WARNING)` bloğuna alındı.
 
 **Neden:** `bert_score` kütüphanesi `roberta-large` yüklerken transformers'ın ağırlık uyuşmazlığı loglarını (`lm_head.*` UNEXPECTED, `pooler.*` MISSING) her eval'da terminal'e yazdırıyordu. Bu bir hata değil — BERTScore sadece encoder katmanlarını kullanır. Hangi model seçilirse seçilsin LOAD REPORT çıkar; `model_type` değiştirmek çözmez, logging susturmak gerekir.
+
+---
+
+### [KARAR] `train.py` — Logger stdout tablosu kaldırıldı
+**Değişiklik:** `logger.configure()` → `logger.configure(format_strs=["log", "csv"])`.
+
+**Neden:** `log_interval` adımda bir basılan grad_norm/loss/mse/nll tablosu terminal çıktısını kalabalıklaştırıyordu. tqdm progress bar'ı zaten `loss=X.XXXX` gösteriyor. Metrikler `log.txt` ve `progress.csv` dosyalarına yazılmaya devam ediyor.

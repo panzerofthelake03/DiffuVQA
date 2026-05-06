@@ -49,7 +49,7 @@ def main():
     set_seed(args.seed)
     
     # dist_util.setup_dist()
-    logger.configure()
+    logger.configure(format_strs=["log", "csv"])
     logger.log("### Creating data loader...")
     start_t = time.time()
     tokenizer = load_tokenizer(args)
