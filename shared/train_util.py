@@ -255,19 +255,19 @@ class TrainLoop:
     def forward_backward(self, image, cond):
         zero_grad(self.model_params)
         for i in range(0, image.shape[0], self.microbatch):
-            image = image[i: i + self.microbatch].to(dist_util.dev())
-            del cond['image_name']
-            cond = {
+            micro_image = image[i: i + self.microbatch].to(dist_util.dev())
+            micro_cond = {
                 k: v[i: i + self.microbatch].to(dist_util.dev())
                 for k, v in cond.items()
+                if k != 'image_name'
             }
-            t, weights = self.schedule_sampler.sample(image.shape[0], dist_util.dev())
+            t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
                 self.ddp_model,
-                image,
+                micro_image,
                 t,
-                model_kwargs=cond,
+                model_kwargs=micro_cond,
             )
 
             losses = compute_losses()
