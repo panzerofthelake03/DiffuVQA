@@ -6,3 +6,4 @@
 /oldreports
 /wandb
 /wandb
+*.pyc
