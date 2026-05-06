@@ -119,5 +119,13 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 
 ---
 
-### [ENDİŞE] Data Leakage — Eğitim tarafı hâlâ açık
-Training loop'ta `cond_x_start = [ddpm_input_pre + ans_emb]` yapısı korunuyor. Model loss hesaplanırken cevap embeddinglerini x_start olarak alıyor. Bu, inference'ta pure noise başlatmayla tutarsızlık yaratmaya devam eder. **Kalıcı çözüm için yeniden eğitim şart.**
+### [KARAR] Data Leakage tamamen kapatıldı — `gaussian_diffusion.py`
+**Değişiklik:** `training_losses` içinde üç kritik düzeltme yapıldı:
+
+1. `x_start` artık `ans_emb + std*noise` (cevap embedding'i) değil, **pure `th.randn`** — inference ile tam tutarlı.
+2. `target` artık `cond_x_start` (fuse+ans tümü) değil, sadece **`ans_emb` (answer segmenti)**. Fuse tokenları loss'a dahil edilmiyor.
+3. `t0_loss`, `tT_loss`, `decoder_nll` tümü artık `x_start_mean` (ans_emb) üzerinden hesaplanıyor — `x_start` (pure noise) üzerinden değil.
+
+**Neden:** Model eğitimde hem input hem hedef olarak cevap embeddingini görüyordu. Sadece gürültü temizlemeyi öğreniyor, sıfırdan üretim yapamıyordu. Bu düzeltmeyle training/inference davranışı tamamen hizalandı.
+
+**Etki:** Mevcut checkpoint'ler bu değişiklikle uyumsuz — sıfırdan yeniden eğitim gerekiyor.

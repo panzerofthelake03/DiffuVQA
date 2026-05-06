@@ -637,15 +637,18 @@ class GaussianDiffusion:
         ddpm_input_pre, ans_emb_pre = real_model.get_ddpm_input(image, model_kwargs)
 
         ans_emb = real_model.get_embeds(input_ids_a)
-        # x_start_mean = torch.cat([ddpm_input_pre, ans_emb], dim=1)
+        # ans_emb is the TARGET — what the model must learn to generate.
+        # x_start_mean is kept for loss computation (t0_loss, decoder_nll) but
+        # is NOT used as the diffusion input to prevent data leakage.
         x_start_mean = ans_emb
         cond_x_start_mean = torch.cat([ddpm_input_pre, x_start_mean], dim=1)
 
-        std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod,
-                                   th.tensor([0]).to(x_start_mean.device),
-                                   x_start_mean.shape)
-
-        x_start = self._get_x_start(x_start_mean, std)
+        # x_start = pure noise, matching inference behaviour.
+        # The model must denoise from random noise to the answer embedding.
+        x_start = th.randn(
+            input_ids_a.shape[0], input_ids_a.shape[1], ddpm_input_pre.shape[2],
+            device=ddpm_input_pre.device
+        )
 
         cond_x_start = torch.cat([ddpm_input_pre, x_start], dim=1)
 
@@ -689,46 +692,38 @@ class GaussianDiffusion:
 
         terms = {}
 
-        target = cond_x_start
+        # Target is only the answer segment — fuse tokens are frozen conditioning,
+        # not something the model should be penalized for reconstructing.
+        # model_output covers the full [fuse | answer] sequence; slice answer portion.
+        fuse_len = ddpm_input_pre.shape[1]
         model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
-        assert model_output.shape == target.shape == cond_x_start.shape
-        terms["mse"] = mean_flat((target - model_output) ** 2)
+        assert model_output.shape == cond_x_start.shape
+        ans_output = model_output[:, fuse_len:, :]
+        terms["mse"] = mean_flat((ans_emb - ans_output) ** 2)
         # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
         # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
         pre_answer_loss = mean_flat((ans_emb_pre - ans_emb) ** 2)
         # cosine_similarity_loss = mean_flat(1 - F.cosine_similarity(ans_emb_pre, ans_emb, dim=-1))
 
-        cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']  # predicted_xstart = model_output
+        # pred_xstart over the full [fuse | answer] sequence
+        cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']
+        # Extract only the predicted answer portion for all answer-side losses
+        model_out_x_start = cond_model_out_x_start[:, fuse_len:, :]
+
         t0_mask = (t == 0)
-        t0_loss = mean_flat((cond_x_start_mean - cond_model_out_x_start) ** 2)
-        # t0_loss = mean_flat((x_start_mean - cond_model_out_x_start[:, model_output.size(1)//2:, :]) ** 2)
+        # At t=0 the model should perfectly predict the answer embedding
+        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2)
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
-        # terms["mse"] = terms["x_mse"] + terms["cond_mse"]
-        # tT_mask = (t == self.num_timesteps - 1)
-        out_mean, _, _ = self.q_mean_variance(x_start, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
+
+        # tT_loss: at the last timestep pure noise should have near-zero mean
+        out_mean, _, _ = self.q_mean_variance(x_start_mean, th.LongTensor([self.num_timesteps - 1]).to(x_start_mean.device))
         tT_loss = mean_flat(out_mean ** 2)
 
-        decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids_a)  # embedding regularization
-
-        # The model predicts the concatenated conditional+target sequence. Extract
-        # the predicted target portion using the target sequence length rather
-        # than assuming it's exactly half of the total length.
-        # Determine target length from x_start (which represents the target tokens).
-        target_len = x_start.size(1)
-        total_len = cond_model_out_x_start.size(1)
-        if target_len > total_len:
-            raise RuntimeError(f"Unexpected sizes: target_len={target_len} > total_len={total_len}")
-        start_idx = total_len - target_len
-        # Debug print to verify slicing indices when DVQA_DEBUG=1
-        try:
-            if os.environ.get('DVQA_DEBUG', '0') == '1':
-                print(f"DEBUG extracting model_out_x_start: total_len={total_len}, target_len={target_len}, start_idx={start_idx}")
-        except Exception:
-            pass
-        model_out_x_start = cond_model_out_x_start[:, start_idx:, :]
-        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a)  # x_0->model_out_x_start
+        # decoder_nll: regularize predicted answer embeddings toward vocabulary tokens
+        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a)
+        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a)
         # assert (model.lm_head.weight == model.word_embedding.weight).all()
 
         terms["loss"] = terms["mse"] + tT_loss + pre_answer_loss + terms["nll"] + decoder_nll

@@ -2,9 +2,8 @@
 
 ## Aktif Görevler
 
-- [ ] Mevcut checkpoint üzerinde düzeltilmiş sampling ile Colab'de test çalıştır (PubMedBERT + SLAKE)
+- [ ] Sıfırdan yeniden eğitim başlat (data leakage kapatıldı, eski checkpoint'ler geçersiz)
 - [ ] Chatbot arayüzü tasarla ve implemente et
-- [ ] Eğitim tarafındaki data leakage'ı tamamen kapatmak için yeniden eğitim planla
 
 ## Tamamlanan Görevler
 
@@ -20,6 +19,9 @@
 - [x] BUG 4: `vqa_model.py` — Hardcoded `145` kanal boyutu dummy forward ile dinamik hesaplamaya çevrildi
 - [x] BUG 5: `gaussian_diffusion.py` — Tanımsız değişkeni referans alan debug print'ler kaldırıldı
 - [x] BUG 6: `train_util.py` — Validation loop 3 hata düzeltildi (StopIteration çökmesi, step=0 erken eval, cond dict mutation)
+- [x] BUG 7: `train_util.py` — `dist.get_world_size()` single GPU'da crash, `dist.is_initialized()` guard eklendi
+- [x] BUG 8: `train_util.py` — `forward_backward`'da `del cond['image_name']` KeyError düzeltildi
+- [x] Data Leakage tamamen kapatıldı — `gaussian_diffusion.py` training_losses: x_start pure noise, target sadece ans_emb
 - [x] `vqa_model.py` — Kullanılmayan `Pooler` sınıfı silindi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — PubMedBERT + SLAKE test parametreleri güncellendi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Eval hücresi `eval/eval_DiffuVQA.py` yolu ve dinamik dosya adı kullanacak şekilde düzeltildi
