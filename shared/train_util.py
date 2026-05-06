@@ -191,8 +191,8 @@ class TrainLoop:
 
             self.run_step(image, cond)
 
-            if hasattr(logger, 'name2val') and 'loss' in logger.name2val:
-                avg_loss = logger.name2val['loss'].mean()
+            if 'loss' in logger.get_current().name2val:
+                avg_loss = float(logger.get_current().name2val['loss'])
                 pbar.set_postfix({'loss': f'{avg_loss:.4f}'}, refresh=False)
 
             if self.step % self.log_interval == 0:

@@ -133,3 +133,17 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 **Neden doğru:** Leakage'ı yaratan şey `x_start`'ın random olmaması değil, `target = cond_x_start` (fuse+ans tümü) olmasıydı. Model hem fuse hem answer'ı yeniden üretmeyi öğreniyordu. Şimdi sadece answer segmentini öğreniyor; fuse tokenlar conditioning olarak kalıyor.
 
 **Etki:** Mevcut checkpoint'ler uyumsuz — sıfırdan yeniden eğitim gerekiyor.
+
+---
+
+### [KARAR] `logger.py` — `dumpkvs()` çıktısı geri açıldı
+**Değişiklik:** `dumpkvs()` içindeki `for fmt in self.output_formats: fmt.writekvs(d)` bloğu "LISA" yorumu adıyla yorum satırına alınmıştı. Bu yüzden logger her adımda değerleri biriktiriyor ama ne stdout'a ne dosyaya yazıyordu. Blok geri açıldı.
+
+**Neden:** Eğitim boyunca terminal'de hiç loss görünmüyordu. `log_interval` adımda bir dumpkvs çağrılıyor ama çıktı tamamen susturulmuştu.
+
+---
+
+### [KARAR] `train_util.py` — tqdm postfix loss gösterimi düzeltildi
+**Değişiklik:** `pbar.set_postfix` içindeki `logger.name2val['loss'].mean()` ifadesi `float(logger.get_current().name2val['loss'])` ile değiştirildi.
+
+**Neden:** `name2val` değerleri `float` türünde — `.mean()` metodu yoktu ve sessizce `AttributeError` veriyordu. Tqdm progress bar'ında anlık loss görünmüyordu.
