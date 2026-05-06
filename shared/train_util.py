@@ -103,19 +103,18 @@ class TrainLoop:
                 copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))
             ]
 
-        if th.cuda.is_available():  # DEBUG **
-            self.use_ddp = True
+        if th.cuda.is_available():
+            self.use_ddp = False
             print(dist_util.dev())
-
-            self.ddp_model = self.model
         else:
-            if dist.get_world_size() > 1:
+            if dist.is_initialized() and dist.get_world_size() > 1:
                 logger.warn(
                     "Distributed training requires CUDA. "
                     "Gradients will not be synchronized properly!"
                 )
             self.use_ddp = False
-            self.ddp_model = self.model
+
+        self.ddp_model = self.model
 
     def _load_and_sync_parameters(self):
 
