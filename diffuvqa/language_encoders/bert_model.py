@@ -50,6 +50,7 @@ from transformers.modeling_outputs import (
 from transformers.modeling_utils import (
     PreTrainedModel,
 )
+from transformers.models.bert.modeling_bert import BertLayer
 import torch
 
 # Handle deprecated functions from transformers.modeling_utils

@@ -46,3 +46,17 @@
 - Evidence: In test output, legacy_generation_ratio=0.0 and fixed_generation_ratio=1.0.
 - Interpretation: Legacy mask fails to diffuse the answer region; fixed mask diffuses the full answer region as intended.
 - Important note: leakage_detected=true in the report refers to legacy baseline detection, not a failure of the current fixed path.
+
+### Decision 6: Fix answer slicing robustness in sampling output
+- File: sample_vqa_GPU.py
+- Change: Replaced half split slicing with explicit [fuse_len : fuse_len + answer_len] slicing.
+- Reason: sample.size(1)//2 is fragile when fuse_len and answer_len diverge; explicit indexing keeps answer extraction aligned to mask semantics.
+- Concern: If upstream code changes answer_len semantics, slice bounds should be revalidated in smoke tests.
+- Follow-up: Keep shape assertion or quick check in future sampling tests for answer segment length.
+
+### Decision 7: Resolve undefined BertLayer in custom BertEncoder path
+- File: diffuvqa/language_encoders/bert_model.py
+- Change: Added import for BertLayer from transformers.models.bert.modeling_bert.
+- Reason: Custom BertEncoder instantiated BertLayer without a local definition, causing NameError risk in non-pretrained init paths.
+- Concern: Transformers internal API paths may change across major versions.
+- Follow-up: If upgrading transformers, verify BertLayer import compatibility and add fallback guard if needed.

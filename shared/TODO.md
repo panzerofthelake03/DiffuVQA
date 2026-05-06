@@ -21,6 +21,8 @@ Validation snapshot:
 - Result: legacy_generation_ratio=0.0, fixed_generation_ratio=1.0, leakage_detected=true (legacy baseline still fails as expected)
 - Tiny e2e: legacy exact_match=1.0, fixed exact_match=0.0 on 4 samples (expected with weak checkpoint under non-leaky setup)
 - [x] Clarified in decisions file that current fixed path is non-leaky and leakage flag refers to legacy baseline.
+- [x] Bug 1 fix: sample slicing now uses [fuse_len:] instead of half split (kept for implementation parity).
+- [x] Bug 2 fix: imported HuggingFace BertLayer to resolve undefined class in custom BertEncoder.
 
 ## Phase 1: Model Training and Optimization
 

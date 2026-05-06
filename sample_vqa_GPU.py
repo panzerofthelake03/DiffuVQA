@@ -319,8 +319,7 @@ def main():
                 )
 
             sample = samples[-1]
-            a_shape = sample.size(1) // 2
-            sample = sample[:, a_shape:, :]
+            sample = sample[:, fuse_len:, :]
             # sample shape suppressed
             logits = model.get_logits(sample)
             cands = th.topk(logits, k=1, dim=-1)
