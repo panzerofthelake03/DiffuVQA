@@ -187,3 +187,24 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 **Değişiklik:** `logger.configure()` → `logger.configure(format_strs=["log", "csv"])`.
 
 **Neden:** `log_interval` adımda bir basılan grad_norm/loss/mse/nll tablosu terminal çıktısını kalabalıklaştırıyordu. tqdm progress bar'ı zaten `loss=X.XXXX` gösteriyor. Metrikler `log.txt` ve `progress.csv` dosyalarına yazılmaya devam ediyor.
+
+---
+
+### [KARAR] BUG 11 — `train_util.py` `forward_backward` microbatch gradient accumulation düzeltildi
+**Değişiklik:** `backward()`, `schedule_sampler.update_with_local_losses()` ve `log_loss_dict()` çağrıları microbatch döngüsü **dışına** taşınmıştı — sadece son microbatch'in gradyanı geriye yayılıyordu. Tüm bu çağrılar döngü **içine** alındı. Loss `/ num_microbatches` ile ölçeklendi, böylece gradient accumulation matematiksel olarak doğru.
+
+**Neden:** batch=64, microbatch=16 iken 4 microbatch yerine 1 backward çalışıyordu. Eğitim hız olarak yapay biçimde hızlı görünüyordu ama öğrenme kalitesi 4x düşmüştü.
+
+**Etki:** Mevcut checkpoint'ler bu hatalı davranışla eğitildi. Yeniden eğitim önerilir.
+
+---
+
+### [KARAR] Resume (checkpoint'ten devam) desteği eklendi — `train_util.py`
+**Değişiklik:**
+- `_load_and_sync_parameters`: `pass` yerine `resume_checkpoint` verilince model ağırlıklarını yükler, `resume_step`'i checkpoint dosya adından parse eder.
+- `_load_optimizer_state`: `opt{NNNNNN}.pt` dosyasını arar; varsa yükler, yoksa uyarı verip fresh optimizer ile devam eder.
+- `save()`: her checkpoint'te `opt{NNNNNN}.pt` de kaydeder.
+- `run_loop`: `step < learning_steps` → `step + resume_step < learning_steps` (total-step mantığı). tqdm `remaining = learning_steps - resume_step` adım gösterir.
+- `__init__`: `_load_optimizer_state()` artık çağrılıyor (önceden yorum satırıydı).
+
+**Notebook:** `RESUME_CHECKPOINT = None` config hücresine eklendi. Eğitim hücresine `resume_flag` değişkeni ile `--resume_checkpoint` geçiriliyor.

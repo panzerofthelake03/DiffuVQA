@@ -32,3 +32,6 @@
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — 50k step eğitim config: LEARNING_STEPS=50000, DIFFUSION_STEPS=2000, SAMPLE_STEP=200, SAVE_INTERVAL=5000
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — BERTScore LOAD REPORT gürültüsü `warnings` + `logging.disable` ile susturuldu
 - [x] `train.py` — `logger.configure(format_strs=["log", "csv"])` ile stdout tablosu kaldırıldı, tqdm loss satırı korundu
+- [x] BUG 11: `train_util.py` — `forward_backward` microbatch gradient accumulation düzeltildi (backward döngü içine alındı, loss/num_microbatches ile ölçeklendi)
+- [x] Resume desteği — `train_util.py` `_load_and_sync_parameters`, `_load_optimizer_state`, `save()` güncellendi; `run_loop` total-step mantığına geçirildi
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — `RESUME_CHECKPOINT` config değişkeni ve `resume_flag` eğitim hücresi eklendi

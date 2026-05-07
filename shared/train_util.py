@@ -89,12 +89,10 @@ class TrainLoop:
 
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
         if self.resume_step:
-            # self._load_optimizer_state()
             frac_done = (self.step + self.resume_step) / self.learning_steps
             lr = self.lr * (1 - frac_done)
             self.opt = AdamW(self.master_params, lr=lr, weight_decay=self.weight_decay)
-            # Model was resumed, either due to a restart or a checkpoint
-            # being specified at the command line.
+            self._load_optimizer_state()
             self.ema_params = [
                 self._load_ema_parameters(rate) for rate in self.ema_rate
             ]
@@ -117,8 +115,14 @@ class TrainLoop:
         self.ddp_model = self.model
 
     def _load_and_sync_parameters(self):
-
-        pass
+        main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
+        if main_checkpoint and bf.exists(main_checkpoint):
+            self.resume_step = parse_resume_step_from_filename(main_checkpoint)
+            logger.log(f"Loading model from checkpoint: {main_checkpoint} (step {self.resume_step})")
+            state_dict = dist_util.load_state_dict(
+                actual_model_path(main_checkpoint), map_location=dist_util.dev()
+            )
+            self.model.load_state_dict(state_dict, strict=False)
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.master_params)
@@ -138,12 +142,20 @@ class TrainLoop:
 
     def _load_optimizer_state(self):
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
-        if bf.exists(main_checkpoint):
-            logger.log(f"loading optimizer state from checkpoint: {main_checkpoint}")
+        if main_checkpoint is None:
+            return
+        opt_checkpoint = bf.join(
+            bf.dirname(main_checkpoint),
+            f"opt{self.resume_step:06d}.pt"
+        )
+        if bf.exists(opt_checkpoint):
+            logger.log(f"Loading optimizer state from: {opt_checkpoint}")
             state_dict = dist_util.load_state_dict(
-                actual_model_path(main_checkpoint), map_location=dist_util.dev()
+                actual_model_path(opt_checkpoint), map_location=dist_util.dev()
             )
             self.opt.load_state_dict(state_dict)
+        else:
+            logger.log(f"No optimizer state found at {opt_checkpoint} — starting with fresh optimizer")
 
     def _setup_fp16(self):
         self.master_params = make_master_params(self.model_params)
@@ -178,11 +190,12 @@ class TrainLoop:
         eval_iter = iter(self.eval_data) if self.eval_data is not None else None
         from tqdm import tqdm
 
-        pbar = tqdm(total=self.learning_steps, desc="Training", unit="step",
+        remaining = self.learning_steps - self.resume_step
+        pbar = tqdm(total=remaining, desc="Training", unit="step",
                    dynamic_ncols=True, smoothing=0.1)
         pbar.update(self.step)
 
-        while (not self.learning_steps) or (self.step < self.learning_steps):
+        while (not self.learning_steps) or (self.step + self.resume_step < self.learning_steps):
             try:
                 image, cond = next(data_iter)
             except StopIteration:
@@ -254,6 +267,7 @@ class TrainLoop:
 
     def forward_backward(self, image, cond):
         zero_grad(self.model_params)
+        num_microbatches = max(1, image.shape[0] // self.microbatch)
         for i in range(0, image.shape[0], self.microbatch):
             micro_image = image[i: i + self.microbatch].to(dist_util.dev())
             micro_cond = {
@@ -269,27 +283,23 @@ class TrainLoop:
                 t,
                 model_kwargs=micro_cond,
             )
-
             losses = compute_losses()
-            # else:
-            #     with self.ddp_model.no_sync():
-            #         losses = compute_losses()
 
-        if isinstance(self.schedule_sampler, LossAwareSampler):
-            self.schedule_sampler.update_with_local_losses(
-                t, losses["loss"].detach()
+            if isinstance(self.schedule_sampler, LossAwareSampler):
+                self.schedule_sampler.update_with_local_losses(
+                    t, losses["loss"].detach()
+                )
+
+            # Scale loss by microbatch count so gradients accumulate correctly
+            loss = (losses["loss"] * weights).mean() / num_microbatches
+            log_loss_dict(
+                self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
-
-        loss = (losses["loss"] * weights).mean()
-        log_loss_dict(
-            self.diffusion, t, {k: v * weights for k, v in losses.items()}
-        )
-        # Eval loss is logged by logger.logkv_mean
-        if self.use_fp16:
-            loss_scale = 2 ** self.lg_loss_scale
-            (loss * loss_scale).backward()
-        else:
-            loss.backward()
+            if self.use_fp16:
+                loss_scale = 2 ** self.lg_loss_scale
+                (loss * loss_scale).backward()
+            else:
+                loss.backward()
 
     def optimize_fp16(self):
         if any(not th.isfinite(p.grad).all() for p in self.model_params):
@@ -381,6 +391,13 @@ class TrainLoop:
         # save_checkpoint(0, self.master_params)
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
+
+        # Save optimizer state alongside model checkpoint
+        opt_filename = f"opt{(self.step + self.resume_step):06d}.pt"
+        opt_path = bf.join(self.checkpoint_path, opt_filename)
+        logger.log(f"saving optimizer state to {opt_path}...")
+        with bf.BlobFile(opt_path, "wb") as f:
+            th.save(self.opt.state_dict(), f)
 
     def _master_params_to_state_dict(self, master_params):
         if self.use_fp16:
