@@ -69,3 +69,10 @@
 - Reason: Prevent fuse region from dominating training loss and keep auxiliary regularizers tied to clean answer semantics.
 - Concern: q_sample add_information path still injects auxiliary conditioning and should be monitored for shortcut behavior.
 - Follow-up: Compare short-run metrics (empty rate, exact match trend, answer-token confidence) before/after this change.
+
+### Decision 9: Stabilize BERTScore reporting in evaluation script
+- File: eval_DiffuVQA.py
+- Change: Replaced split BERTScore paths with one helper (lazy import + fallback model: distilbert-base-uncased).
+- Reason: Avoid silent 0.0 due to startup import gating and inconsistent function usage.
+- Concern: If bert_score package is missing entirely, metric still falls back to 0.0 with warning.
+- Follow-up: Verify environment package install when avg_bert_score remains 0 after this patch.

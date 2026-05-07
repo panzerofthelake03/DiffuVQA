@@ -9,14 +9,7 @@ from torchmetrics.text.rouge import ROUGEScore
 from shared.excel_export_module import record_evaluation_data
 
 rougeScore = ROUGEScore()
-# Temporarily disable BERT Score due to PyTorch version compatibility issues
-HAS_BERT_SCORE = False
-try:
-    from bert_score import score
-    HAS_BERT_SCORE = True
-except Exception as e:
-    print(f"Warning: BERT Score disabled due to: {e}")
-    HAS_BERT_SCORE = False
+# Keep import optional at runtime; the helper below tries robust fallbacks.
 
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
@@ -105,6 +98,32 @@ def get_bleu(recover, reference,n=1):
 def calculate_meteor(recover,reference):
     score = meteor_score([reference], recover)
     return score
+
+
+def compute_bert_f1(predictions, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=False):
+    """Compute BERTScore F1 with lazy import and a safe fallback model."""
+    if not predictions or not references:
+        return 0.0
+
+    try:
+        from bert_score import score as bert_score_fn
+    except Exception as e:
+        print(f"Warning: BERT Score import failed: {e}")
+        return 0.0
+
+    try:
+        _, _, f1 = bert_score_fn(predictions, references, model_type=model_type, lang=lang, verbose=verbose)
+        return float(torch.mean(f1).item())
+    except Exception as e:
+        print(f"Warning: BERT Score failed with {model_type}: {e}")
+        fallback_model = 'distilbert-base-uncased'
+        if model_type != fallback_model:
+            try:
+                _, _, f1 = bert_score_fn(predictions, references, model_type=fallback_model, lang=lang, verbose=verbose)
+                return float(torch.mean(f1).item())
+            except Exception as e2:
+                print(f"Warning: BERT Score fallback ({fallback_model}) also failed: {e2}")
+        return 0.0
 
 
 def compute_tf_idf(vectorizer, sentences):
@@ -291,17 +310,14 @@ if __name__ == '__main__':
             total_samples += cnt
             accuracy = acc / cnt
 
-            # Calculate BERT Score only if available
-            bert_f1_score = 0.0
-            if HAS_BERT_SCORE:
-                try:
-                    P, R, F1 = score(recovers, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=True)
-                    bert_f1_score = torch.mean(F1).item()
-                except Exception as e:
-                    print(f"Warning: BERT Score calculation failed: {e}")
-                    bert_f1_score = 0.0
-            else:
-                print("Warning: BERT Score not available, skipping...")
+            # Calculate BERT Score (lazy import + fallback model).
+            bert_f1_score = compute_bert_f1(
+                recovers,
+                references,
+                model_type='microsoft/deberta-xlarge-mnli',
+                lang='en',
+                verbose=True,
+            )
                 
             precision, recall, f1_score = calculate_f1(references, recovers)
             CIDer =  cider_score(references, recovers)
@@ -451,17 +467,16 @@ if __name__ == '__main__':
 
             # print(len(recovers), len(references), len(recovers))
 
-            # Calculate BERT Score for MBR if available
-            mbr_bert_score = torch.tensor(0.0)
-            if HAS_BERT_SCORE:
-                try:
-                    P, R, F1 = score(recovers, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=True)
-                    mbr_bert_score = torch.mean(F1)
-                except Exception as e:
-                    print(f"Warning: BERT Score calculation failed in MBR: {e}")
-                    mbr_bert_score = torch.tensor(0.0)
-            else:
-                print("Warning: BERT Score not available for MBR, skipping...")
+            # Calculate BERT Score for MBR (lazy import + fallback model).
+            mbr_bert_score = torch.tensor(
+                compute_bert_f1(
+                    recovers,
+                    references,
+                    model_type='microsoft/deberta-xlarge-mnli',
+                    lang='en',
+                    verbose=True,
+                )
+            )
 
             print('*' * 30)
             print('avg BLEU score', np.mean(bleu))
@@ -508,12 +523,14 @@ if __name__ == '__main__':
         # CIDEr-like
         cider = cider_score(gens, refs)
 
-        # BERTScore (may be slower) - returns P,R,F1 arrays
-        try:
-            P, R, F1 = bert_score(gens, refs, model_type=bert_model, lang='en', verbose=False)
-            bert_f1 = float(np.mean(F1.tolist()))
-        except Exception:
-            bert_f1 = 0.0
+        # BERTScore (may be slower) via shared helper.
+        bert_f1 = compute_bert_f1(
+            gens,
+            refs,
+            model_type=bert_model,
+            lang='en',
+            verbose=False,
+        )
 
         out = {
             'samples': n,

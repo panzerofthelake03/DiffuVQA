@@ -24,6 +24,7 @@ Validation snapshot:
 - [x] Bug 1 fix: sample slicing now uses [fuse_len:fuse_len+answer_len] instead of half split.
 - [x] Bug 2 fix: imported HuggingFace BertLayer to resolve undefined class in custom BertEncoder.
 - [x] Training-loss alignment update: answer-only MSE target and clean-answer based tT/decoder regularization in gaussian_diffusion training path.
+- [x] Eval fix: unified BERTScore computation with lazy import and fallback model in eval_DiffuVQA.py.
 
 ## Phase 1: Model Training and Optimization
 
