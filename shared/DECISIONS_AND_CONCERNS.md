@@ -91,3 +91,43 @@
 - Reason: Continue training from existing checkpoints with optimizer dynamics preserved, not just warm-start weights.
 - Concern: Resuming from EMA-only checkpoints remains possible but may not perfectly match non-EMA continuation.
 - Follow-up: Prefer RESUME_CHECKPOINT pointing to main model checkpoint when available for exact continuation.
+
+## 2026-05-08
+
+### Decision 12: Normalize runtime model family from model, vocab, config, and init signals
+- File: shared/basic_utils.py
+- Change: Added a runtime preset table for bert, bio-bert, and roberta families.
+- Change: Added normalization helpers that resolve and validate model family from model, vocab, config_name, and use_plm_init.
+- Reason: The previous setup allowed mixed runtime identities such as BioBERT tokenizer plus BERT model config, which made training and sampling behavior ambiguous.
+- Concern: Older checkpoints with inconsistent metadata will now be flagged instead of being sampled silently.
+- Follow-up: Audit existing historical checkpoints before reuse and repair metadata only when the true training family is known.
+
+### Decision 13: Make transformer construction args-driven instead of hardcoded per branch
+- File: shared/basic_utils.py
+- Change: Replaced hardcoded transformer-bert, transformer-bio-bert, and transformer-roberta constructor constants with args-driven values for hidden dims, dropout, config_name, vocab_size, and init mode.
+- Reason: The active training or sampling configuration should determine the runtime model, not stale hardcoded constants in the factory.
+- Concern: New training runs may diverge from older notebook behavior because they now use the intended preset consistently.
+- Follow-up: Treat pre-fix and post-fix checkpoints as separate experiment families when comparing results.
+
+### Decision 14: Fail fast on conflicting checkpoint runtime metadata during sampling
+- File: sample_vqa_GPU.py
+- Change: Added explicit validation after loading checkpoint training_args.json and before model creation.
+- Change: Sampling now raises a clear error when model, vocab, config_name, and use_plm_init imply different model families.
+- Reason: Silent fallback or partial normalization can hide root-cause metadata errors and produce misleading generations.
+- Concern: Some legacy Bio-Bert checkpoints that previously sampled under ambiguous settings may no longer run without metadata review.
+- Follow-up: If legacy checkpoint reuse is required, inspect training_args.json and only repair it when the true pretrained family is verified from the original run.
+
+### Decision 15: Bind Colab notebook model selection to explicit presets and add smoke tests
+- File: shared/run_diffuvqa_colab.ipynb
+- Change: Replaced free-form model naming with MODEL_PRESET_KEY and derived MODEL_ARCH, VOCAB_NAME, CONFIG_NAME, and USE_PLM_INIT.
+- Change: Added a preflight smoke test before training and a sampling smoke test before actual sampling.
+- Reason: The notebook should launch consistent runtime settings and catch broken dataset, image path, or sampling-mask issues before expensive runs.
+- Concern: Users may assume old checkpoints remain drop-in compatible with the new notebook flow, which is not guaranteed for inconsistent historical runs.
+- Follow-up: When reusing older checkpoints, prefer a compatibility audit first, then run the notebook smoke tests before full sampling.
+
+### Decision 16: Cross-repo follow-up required for PubMedBERT repository parity
+- Files: shared/DECISIONS_AND_CONCERNS.md, shared/PUBMEDBERT_REPO_AUDIT_PROMPT.md
+- Change: Added an explicit follow-up to audit the PubMedBERT repository for the same model-family mismatch, checkpoint metadata, notebook preset, and smoke-test gaps.
+- Reason: Bio-Bert and PubMedBERT repos appear to share workflow patterns, so the same class of failures may exist there too.
+- Concern: Applying only the Bio-Bert fix set can leave PubMedBERT results inconsistent and invalidate branch-to-branch comparisons.
+- Follow-up: Run the prepared audit-and-fix prompt against the PubMedBERT repo and compare checkpoint compatibility rules before new experiments.
