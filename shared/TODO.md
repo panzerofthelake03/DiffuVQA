@@ -28,6 +28,11 @@ Validation snapshot:
 - [x] Colab notebook sync: Bio-Bert config now uses PubMedBERT-like training cadence (SAVE_INTERVAL=2000, LOG_INTERVAL=100).
 - [x] Implemented true resume training flow: model+EMA+optimizer checkpoint continuation and total-step-aware loop in shared/train_util.py.
 - [x] Updated Colab training cells for resume usage (RESUME_CHECKPOINT, TARGET_TOTAL_STEPS, --resume_checkpoint, --eval_interval).
+- [x] Added runtime model preset normalization in shared/basic_utils.py for bert, bio-bert, and roberta families.
+- [x] Switched transformer construction to args-driven config/vocab/init settings instead of hardcoded model constants.
+- [x] Added fail-fast checkpoint/runtime validation in sample_vqa_GPU.py for conflicting model/vocab/config_name/use_plm_init metadata.
+- [x] Updated Colab notebook model selection to use MODEL_PRESET_KEY and derived runtime fields.
+- [x] Added Colab preflight smoke test before training and sampling smoke test before actual sampling.
 
 ## Phase 1: Model Training and Optimization
 
