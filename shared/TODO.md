@@ -25,6 +25,7 @@ Validation snapshot:
 - [x] Bug 2 fix: imported HuggingFace BertLayer to resolve undefined class in custom BertEncoder.
 - [x] Training-loss alignment update: answer-only MSE target and clean-answer based tT/decoder regularization in gaussian_diffusion training path.
 - [x] Eval fix: unified BERTScore computation with lazy import and fallback model in eval_DiffuVQA.py.
+- [x] Colab notebook sync: Bio-Bert config now uses PubMedBERT-like training cadence (SAVE_INTERVAL=2000, LOG_INTERVAL=100).
 
 ## Phase 1: Model Training and Optimization
 

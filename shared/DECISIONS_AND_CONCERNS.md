@@ -76,3 +76,10 @@
 - Reason: Avoid silent 0.0 due to startup import gating and inconsistent function usage.
 - Concern: If bert_score package is missing entirely, metric still falls back to 0.0 with warning.
 - Follow-up: Verify environment package install when avg_bert_score remains 0 after this patch.
+
+### Decision 10: Align Bio-Bert notebook training log/save cadence with PubMedBERT
+- File: shared/run_diffuvqa_colab.ipynb
+- Change: SAVE_INTERVAL updated 200 -> 2000 and LOG_INTERVAL updated 20 -> 100 in config cell.
+- Reason: Reduce Colab/Drive I/O and logging overhead to match faster PubMedBERT notebook cadence.
+- Concern: Sparser checkpoints increase potential progress loss window on interruptions.
+- Follow-up: If frequent recovery is needed, consider SAVE_INTERVAL=1000 as middle ground.
