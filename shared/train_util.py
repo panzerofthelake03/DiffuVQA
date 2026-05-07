@@ -1,6 +1,7 @@
 import copy
 import functools
 import os
+import re
 
 import blobfile as bf
 import numpy as np
@@ -91,10 +92,12 @@ class TrainLoop:
 
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
         if self.resume_step:
-            # self._load_optimizer_state()
-            frac_done = (self.step + self.resume_step) / self.learning_steps
-            lr = self.lr * max(1 - frac_done, 0.1)
-            self.opt = AdamW(self.master_params, lr=lr, weight_decay=self.weight_decay)
+            opt_loaded = self._load_optimizer_state()
+            if (not opt_loaded) and self.learning_steps:
+                frac_done = (self.step + self.resume_step) / self.learning_steps
+                lr = self.lr * max(1 - frac_done, 0.1)
+                for param_group in self.opt.param_groups:
+                    param_group["lr"] = lr
             # Model was resumed, either due to a restart or a checkpoint
             # being specified at the command line.
             self.ema_params = [
@@ -120,8 +123,21 @@ class TrainLoop:
             self.ddp_model = self.model
 
     def _load_and_sync_parameters(self):
+        main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
+        if (not main_checkpoint) or str(main_checkpoint).lower() in {"none", "null", ""}:
+            dist_util.sync_params(self.model.parameters())
+            return
 
-        pass
+        self.resume_step = parse_resume_step_from_filename(main_checkpoint)
+
+        if dist.get_rank() == 0:
+            logger.log(f"loading model from checkpoint: {main_checkpoint}...")
+            state_dict = dist_util.load_state_dict(
+                actual_model_path(main_checkpoint), map_location=dist_util.dev()
+            )
+            self.model.load_state_dict(state_dict)
+
+        dist_util.sync_params(self.model.parameters())
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.master_params)
@@ -141,12 +157,20 @@ class TrainLoop:
 
     def _load_optimizer_state(self):
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
-        if bf.exists(main_checkpoint):
-            logger.log(f"loading optimizer state from checkpoint: {main_checkpoint}")
+        if (not main_checkpoint) or str(main_checkpoint).lower() in {"none", "null", ""}:
+            return False
+
+        opt_checkpoint = bf.join(bf.dirname(main_checkpoint), f"opt{self.resume_step:06d}.pt")
+        if bf.exists(opt_checkpoint):
+            logger.log(f"loading optimizer state from checkpoint: {opt_checkpoint}")
             state_dict = dist_util.load_state_dict(
-                actual_model_path(main_checkpoint), map_location=dist_util.dev()
+                actual_model_path(opt_checkpoint), map_location=dist_util.dev()
             )
             self.opt.load_state_dict(state_dict)
+            return True
+
+        logger.log(f"optimizer checkpoint not found at {opt_checkpoint}, using fresh optimizer state")
+        return False
 
     def _setup_fp16(self):
         self.master_params = make_master_params(self.model_params)
@@ -179,10 +203,10 @@ class TrainLoop:
         # and stop once the requested number of steps is reached.
         data_iter = iter(self.data)
         total = self.learning_steps if self.learning_steps else None
-        with tqdm(total=total, initial=self.step, desc="Training", unit="step") as pbar:
+        with tqdm(total=total, initial=self.step + self.resume_step, desc="Training", unit="step") as pbar:
             # expose pbar to other methods if needed
             self.pbar = pbar
-            while (not self.learning_steps) or (self.step < self.learning_steps):
+            while (not self.learning_steps) or (self.step + self.resume_step < self.learning_steps):
                 try:
                     image, cond = next(data_iter)
                 except StopIteration:
@@ -225,7 +249,7 @@ class TrainLoop:
             # clear pbar reference when done
             self.pbar = None
         # Save the last checkpoint if it wasn't already saved.
-        if (self.step - 1) % self.save_interval != 0:
+        if (self.step + self.resume_step - 1) % self.save_interval != 0:
             self.save()
 
     def run_step(self, image, cond):
@@ -389,9 +413,17 @@ class TrainLoop:
                 th.save(state_dict, f)  # save locally
                 # pass # save empty
 
-        # save_checkpoint(0, self.master_params)
+        save_checkpoint(0, self.master_params)
+
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
+
+        # Save optimizer state for true training continuation.
+        if (not dist.is_initialized()) or dist.get_rank() == 0:
+            opt_filename = f"opt{(self.step + self.resume_step):06d}.pt"
+            logger.log(f"saving optimizer state to {bf.join(self.checkpoint_path, opt_filename)}")
+            with bf.BlobFile(bf.join(self.checkpoint_path, opt_filename), "wb") as f:
+                th.save(self.opt.state_dict(), f)
 
     def _master_params_to_state_dict(self, master_params):
         if self.use_fp16:
@@ -417,10 +449,11 @@ def parse_resume_step_from_filename(filename):
     Parse filenames of the form path/to/modelNNNNNN.pt, where NNNNNN is the
     checkpoint's number of steps.
     """
-    if filename[-3:] == '.pt':
-        return int(filename[-9:-3])
-    else:
-        return 0
+    basename = os.path.basename(str(filename))
+    match = re.search(r"(\d{6})\.pt$", basename)
+    if match:
+        return int(match.group(1))
+    return 0
 
 
 def get_blob_logdir():

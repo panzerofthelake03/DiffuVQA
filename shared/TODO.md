@@ -26,6 +26,8 @@ Validation snapshot:
 - [x] Training-loss alignment update: answer-only MSE target and clean-answer based tT/decoder regularization in gaussian_diffusion training path.
 - [x] Eval fix: unified BERTScore computation with lazy import and fallback model in eval_DiffuVQA.py.
 - [x] Colab notebook sync: Bio-Bert config now uses PubMedBERT-like training cadence (SAVE_INTERVAL=2000, LOG_INTERVAL=100).
+- [x] Implemented true resume training flow: model+EMA+optimizer checkpoint continuation and total-step-aware loop in shared/train_util.py.
+- [x] Updated Colab training cells for resume usage (RESUME_CHECKPOINT, TARGET_TOTAL_STEPS, --resume_checkpoint, --eval_interval).
 
 ## Phase 1: Model Training and Optimization
 

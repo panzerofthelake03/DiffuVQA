@@ -83,3 +83,11 @@
 - Reason: Reduce Colab/Drive I/O and logging overhead to match faster PubMedBERT notebook cadence.
 - Concern: Sparser checkpoints increase potential progress loss window on interruptions.
 - Follow-up: If frequent recovery is needed, consider SAVE_INTERVAL=1000 as middle ground.
+
+### Decision 11: Implement true training continuation from intermediate checkpoints
+- File: shared/train_util.py
+- Change: Added real resume model loading in _load_and_sync_parameters, total-step-aware loop stop condition, optimizer state save/load (optXXXXXX.pt), and robust resume-step parsing.
+- Change: Re-enabled main model checkpoint save alongside EMA for safer resume targets.
+- Reason: Continue training from existing checkpoints with optimizer dynamics preserved, not just warm-start weights.
+- Concern: Resuming from EMA-only checkpoints remains possible but may not perfectly match non-EMA continuation.
+- Follow-up: Prefer RESUME_CHECKPOINT pointing to main model checkpoint when available for exact continuation.
