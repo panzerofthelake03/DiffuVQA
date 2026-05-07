@@ -93,9 +93,24 @@ def main():
     original_diffusion_step = args.step
 
     training_args['batch_size'] = args.batch_size
+
+    # Capture CLI family flags before training_args overwrites them
+    cli_vocab = args.vocab if hasattr(args, 'vocab') and args.vocab else None
+    cli_model = args.model if hasattr(args, 'model') and args.model else None
+
     args.__dict__.update(training_args)
 
-    
+    # Fail-fast: reject CLI flags that contradict the checkpoint's training family
+    _FAMILY_KEYS = ('vocab', 'model', 'use_plm_init')
+    for key in _FAMILY_KEYS:
+        cli_val = {'vocab': cli_vocab, 'model': cli_model}.get(key)
+        ckpt_val = training_args.get(key)
+        if cli_val and ckpt_val and cli_val != ckpt_val:
+            raise ValueError(
+                f"[sampling] CLI --{key}={cli_val!r} conflicts with checkpoint "
+                f"training_args {key}={ckpt_val!r}. Use the checkpoint's value or omit the flag."
+            )
+
     if(original_model_path != ""):
         args.model_path = original_model_path
     logger.log(f"### Updated args: {args}")
