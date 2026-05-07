@@ -177,42 +177,6 @@ def create_model_and_diffusion(args):
             args=args
         )
 
-    elif args.model == 'transformer-pubmedbert':
-        model = TransformerNetModel(
-            input_dims=768,
-            output_dims=768,
-            hidden_t_dim=128,
-            dropout=0.1,
-            config_name='NeuML/pubmedbert-base-embeddings',
-            vocab_size=30522,
-            init_pretrained='pubmedbert',
-            args=args
-        )
-
-    elif args.model == 'transformer-bio-bert':
-        model = TransformerNetModel(
-            input_dims=768,
-            output_dims=768,
-            hidden_t_dim=128,
-            dropout=0.1,
-            config_name='dmis-lab/biobert-v1.1',
-            vocab_size=28996,
-            init_pretrained='bert',
-            args=args
-        )
-
-    elif args.model == 'transformer-roberta':
-        model = TransformerNetModel(
-            input_dims=1024,
-            output_dims=1024,
-            hidden_t_dim=128,
-            dropout=0.1,
-            config_name='roberta-large',
-            vocab_size=50265,
-            init_pretrained='roberta',
-            args=args
-        )
-
     betas = gd.get_named_beta_schedule(args.noise_schedule, args.diffusion_steps)
 
     if not args.timestep_respacing:
