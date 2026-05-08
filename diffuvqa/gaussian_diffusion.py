@@ -724,7 +724,11 @@ class GaussianDiffusion:
         # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
         # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
-        pre_answer_loss = mean_flat((ans_emb_pre - ans_emb) ** 2)
+        # pre_answer_loss is disabled: the CVAE fusion output (ans_emb_pre)
+        # lives in a different semantic space than the word embedding (ans_emb).
+        # MSE between these two would pull the vision-language fusion toward the
+        # raw token-embedding manifold, which degrades representation quality.
+        pre_answer_loss = th.tensor(0.0, device=ans_emb.device)
         # cosine_similarity_loss = mean_flat(1 - F.cosine_similarity(ans_emb_pre, ans_emb, dim=-1))
 
         cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']
