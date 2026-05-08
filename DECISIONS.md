@@ -199,6 +199,52 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 
 ---
 
+### [KARAR] BUG 12 — `vqa_datasets.py` DataLoader iterator hatası düzeltildi
+**Değişiklik:** `next(data)` → `next(iter(data))`.
+
+**Neden:** `DataLoader` nesnesi iterator değil, iterable. Doğrudan `next()` geçmek `TypeError: 'DataLoader' object is not an iterator` verir. `iter()` ile önce iterator oluşturulmalı.
+
+---
+
+### [KARAR] `eval/eval_DiffuVQA.py` — `punkt_tab` NLTK hatası düzeltildi
+**Değişiklik:** `nltk.download('punkt_tab')` satırı eklendi.
+
+**Neden:** NLTK 3.8+ sürümünde `punkt` tokenizer `punkt_tab` adını kullandı. Eski `punkt` resource'u bulunamadığında `LookupError` veriyordu.
+
+---
+
+### [KARAR] `shared/basic_utils.py` — Ölü model dalları temizlendi
+**Değişiklik:** `transformer-pubmedbert`, `transformer-bio-bert`, `transformer-roberta` hardcoded branch'leri `create_model_and_diffusion`'dan silindi.
+
+**Neden:** Bu dallar `hidden_t_dim=128` hardcode ediyordu, `args.hidden_t_dim` ile çakışıyordu. `transformer-bert` artık `--vocab pubmedbert` ile otomatik PubMedBERT seçiyor; ayrı bir dal gereksiz.
+
+---
+
+### [KARAR] `sample_vqa_GPU.py` — Model-family mismatch için fail-fast kontrolü eklendi
+**Değişiklik:** `args.__dict__.update(training_args)` sonrasında `vocab`, `model`, `use_plm_init` key'leri için CLI argümanı ile checkpoint'teki değer karşılaştırılıyor; uyuşmazlıkta `ValueError` fırlatılıyor.
+
+**Neden:** Farklı tokenizer ile kaydedilmiş bir checkpoint'i yanlış `--vocab` ile çalıştırmak decode'u sessizce bozar. Hata erken ve açıkça yakalanmalı.
+
+---
+
+### [KARAR] BUG 13 — `vqa_model.py` + `gaussian_diffusion.py` öğrenmeyi bloke eden 3 mimari hata düzeltildi
+**Değişiklik:**
+
+1. `lm_head` weight tying kaldırıldı — `bert`, `pubmedbert`, `roberta` init bloklarındaki `self.lm_head.weight = self.word_embedding.weight` satırları silindi. `lm_head` artık bağımsız `nn.Linear` olarak `__init__` içinde tanımlanıyor ve `normal_(0, 0.02)` ile başlatılıyor.
+
+2. `feature_fusion.forward()` BERT preprocessing düzeltildi — `q_ids` → `language_encoder` → son olarak pozisyon ve token_type embedding'leri ekleniyor, `LayerNorm` + dropout uygulanıyor. Önceden sadece token embedding BERT encoder'a giriyordu; pozisyon bilgisi eksikti.
+
+3. `gaussian_diffusion.py` `pre_answer_loss` kaldırıldı — `mean_flat((ans_emb_pre - ans_emb)**2)` loss toplamından çıkarıldı.
+
+**Neden:**
+- Tied lm_head: MSE loss lm_head'i bir yöne, NLL loss word_embedding üzerinden ters yöne çekiyordu. İkisi birbirini iptal ediyordu.
+- Eksik BERT preprocessing: Pretrained pozisyon bilgisi encoder'a hiç ulaşmıyordu; model pozisyon bağlamı olmadan işliyordu.
+- `pre_answer_loss`: `feature_fusion` görüntü+soru encode ediyor; cevap embedding'ine benzemesi istenmez. Bu terim yanlış gradient ekliyor, feature_fusion'ın conditioning kalitesini düşürüyordu.
+
+**Etki:** Mevcut checkpoint'ler uyumsuz — sıfırdan yeniden eğitim gerekiyor.
+
+---
+
 ### [KARAR] Resume (checkpoint'ten devam) desteği eklendi — `train_util.py`
 **Değişiklik:**
 - `_load_and_sync_parameters`: `pass` yerine `resume_checkpoint` verilince model ağırlıklarını yükler, `resume_step`'i checkpoint dosya adından parse eder.

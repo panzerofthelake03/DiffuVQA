@@ -2,7 +2,7 @@
 
 ## Aktif Görevler
 
-- [ ] Sıfırdan yeniden eğitim başlat — 50k step, diffusion_steps=2000, batch=64, LR=0.000283 (A100)
+- [ ] Sıfırdan yeniden eğitim başlat — 150k step, diffusion_steps=2000, batch=64, LR=0.000283 (A100) — tüm BUG 11-13 düzeltmeleriyle
 - [ ] Chatbot arayüzü tasarla ve implemente et
 
 ## Tamamlanan Görevler
@@ -35,3 +35,12 @@
 - [x] BUG 11: `train_util.py` — `forward_backward` microbatch gradient accumulation düzeltildi (backward döngü içine alındı, loss/num_microbatches ile ölçeklendi)
 - [x] Resume desteği — `train_util.py` `_load_and_sync_parameters`, `_load_optimizer_state`, `save()` güncellendi; `run_loop` total-step mantığına geçirildi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — `RESUME_CHECKPOINT` config değişkeni ve `resume_flag` eğitim hücresi eklendi
+- [x] BUG 12: `vqa_datasets.py` — `next(data)` → `next(iter(data))` DataLoader iterator hatası düzeltildi
+- [x] `eval/eval_DiffuVQA.py` — `nltk.download('punkt_tab')` eklendi (NLTK 3.8+ LookupError)
+- [x] `shared/basic_utils.py` — Ölü `transformer-pubmedbert`, `transformer-bio-bert`, `transformer-roberta` dalları silindi
+- [x] `sample_vqa_GPU.py` — Model-family mismatch için fail-fast `ValueError` kontrolü eklendi
+- [x] LR scheduler cosine decay'e geçirildi — `train_util.py` `_anneal_lr`: `lr * 0.5 * (1 + cos(π * frac_done))`
+- [x] `train.py` + `train_util.py` — `logger.configure(dir=args.checkpoint_path)` ile `progress.csv` ve `log.txt` Drive'a kaydediliyor
+- [x] BUG 13: `vqa_model.py` — `lm_head` weight tying kaldırıldı (bert/pubmedbert/roberta init bloklarında)
+- [x] BUG 13: `vqa_model.py` — `feature_fusion.forward()` BERT preprocessing düzeltildi (pozisyon + token_type embedding + LayerNorm + dropout)
+- [x] BUG 13: `gaussian_diffusion.py` — `pre_answer_loss` loss toplamından kaldırıldı
