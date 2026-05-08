@@ -128,15 +128,23 @@ class feature_fusion(nn.Module):
         q_ids = cond.pop('input_q_id')
         q_mask = (q_ids != 0).long().to(q_ids.device)
         q_input_shape = q_mask.size()
-        question_emb = self.language_encoder(q_ids)
+
+        # Full BERT input = token_emb + position_emb + token_type_emb + LayerNorm + Dropout
+        # Previously only token embeddings were passed to the encoder, making
+        # pretrained positional and token-type information unavailable to the model.
+        token_emb = self.language_encoder(q_ids)
+        seq_len = q_ids.size(1)
+        position_ids = torch.arange(seq_len, dtype=torch.long, device=q_ids.device).unsqueeze(0)
+        token_type_ids = torch.zeros_like(q_ids)
+        position_emb = self.bert.embeddings.position_embeddings(position_ids)
+        token_type_emb = self.bert.embeddings.token_type_embeddings(token_type_ids)
+        question_emb = self.bert.embeddings.LayerNorm(token_emb + position_emb + token_type_emb)
+        question_emb = self.bert.embeddings.dropout(question_emb)
+
         extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, dtype=question_emb.dtype)
         for layer in self.bert.encoder.layer:
             question_feats = layer(question_emb, extended_q_masks)[0]
-        question_feats = self.question_feature_proj(question_feats)  # B 32 768
-
-        # print("q:", question_feats.shape)
-
-        # question_feats = self.question_feature_proj(question_feats)
+        question_feats = self.question_feature_proj(question_feats)
 
         # == Image Encoding ==
         image_feats = self.vision_encoder(image)
@@ -248,9 +256,12 @@ class TransformerNetModel(nn.Module):
         self.hidden_size = config.hidden_size
 
         self.word_embedding = nn.Embedding(vocab_size, self.input_dims)
-        self.lm_head = nn.Linear(self.input_dims, vocab_size)
-        with th.no_grad():
-            self.lm_head.weight = self.word_embedding.weight
+        # lm_head is an independent projection — not tied to word_embedding.
+        # Tying forces word_embedding and lm_head to optimize against each other
+        # (diffusion pushes embeddings while NLL pulls them back toward vocab),
+        # which prevents the model from learning a stable answer manifold.
+        self.lm_head = nn.Linear(self.input_dims, vocab_size, bias=False)
+        nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.02)
 
         time_embed_dim = hidden_t_dim * 4
         self.time_embed = nn.Sequential(
@@ -300,11 +311,6 @@ class TransformerNetModel(nn.Module):
                 pass
             self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
 
-            with th.no_grad():
-                self.lm_head.weight = self.word_embedding.weight
-            # self.lm_head.weight.requires_grad = False
-            # self.word_embedding.weight.requires_grad = False
-
             self.input_transformers = temp_bert.encoder
             self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
             self.position_embeddings = temp_bert.embeddings.position_embeddings
@@ -313,8 +319,6 @@ class TransformerNetModel(nn.Module):
             # Project pretrained position embeddings to args.hidden_dim if needed
             try:
                 pos_dim = self.position_embeddings.weight.size(1)
-                # Project positional embeddings into the transformer's hidden
-                # size so they can be added to other transformer inputs.
                 target_dim = self.hidden_size
                 if pos_dim != target_dim:
                     self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
@@ -366,11 +370,6 @@ class TransformerNetModel(nn.Module):
                 pass
             self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
 
-            with th.no_grad():
-                self.lm_head.weight = self.word_embedding.weight
-            # self.lm_head.weight.requires_grad = False
-            # self.word_embedding.weight.requires_grad = False
-
             self.input_transformers = temp_bert.encoder
             self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
             self.position_embeddings = temp_bert.embeddings.position_embeddings
@@ -379,8 +378,6 @@ class TransformerNetModel(nn.Module):
             # Project pretrained position embeddings to args.hidden_dim if needed
             try:
                 pos_dim = self.position_embeddings.weight.size(1)
-                # Project positional embeddings into the transformer's hidden
-                # size so they can be added to other transformer inputs.
                 target_dim = self.hidden_size
                 if pos_dim != target_dim:
                     self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
@@ -411,9 +408,6 @@ class TransformerNetModel(nn.Module):
             except Exception:
                 pass
             self.fuse = feature_fusion(self.word_embedding, temp_roberta, args)
-
-            with th.no_grad():
-                self.lm_head.weight = self.word_embedding.weight
 
             self.input_transformers = temp_roberta.encoder
             self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))

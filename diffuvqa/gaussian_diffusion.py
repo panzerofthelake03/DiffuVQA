@@ -703,9 +703,6 @@ class GaussianDiffusion:
         # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
         # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
-        pre_answer_loss = mean_flat((ans_emb_pre - ans_emb) ** 2)
-        # cosine_similarity_loss = mean_flat(1 - F.cosine_similarity(ans_emb_pre, ans_emb, dim=-1))
-
         # pred_xstart over the full [fuse | answer] sequence
         cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']
         # Extract only the predicted answer portion for all answer-side losses
@@ -725,7 +722,7 @@ class GaussianDiffusion:
         terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a)
         # assert (model.lm_head.weight == model.word_embedding.weight).all()
 
-        terms["loss"] = terms["mse"] + tT_loss + pre_answer_loss + terms["nll"] + decoder_nll
+        terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll
 
         return terms
 
