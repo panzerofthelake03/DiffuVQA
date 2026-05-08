@@ -9,8 +9,8 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 import io
-import torch 
-from tqdm.auto import tqdm
+import torch
+
 from diffuvqa.utils import dist_util, logger
 from diffuvqa.utils.fp16_util import (
     make_master_params,
@@ -76,8 +76,6 @@ class TrainLoop:
         self.resume_step = 0
         self.global_batch = self.batch_size
 
-        self.last_loss = None
-
         self.model_params = list(self.model.parameters())
         self.master_params = self.model_params
         self.lg_loss_scale = INITIAL_LOG_LOSS_SCALE
@@ -91,12 +89,10 @@ class TrainLoop:
 
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
         if self.resume_step:
-            # self._load_optimizer_state()
             frac_done = (self.step + self.resume_step) / self.learning_steps
             lr = self.lr * (1 - frac_done)
             self.opt = AdamW(self.master_params, lr=lr, weight_decay=self.weight_decay)
-            # Model was resumed, either due to a restart or a checkpoint
-            # being specified at the command line.
+            self._load_optimizer_state()
             self.ema_params = [
                 self._load_ema_parameters(rate) for rate in self.ema_rate
             ]
@@ -105,23 +101,30 @@ class TrainLoop:
                 copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))
             ]
 
-        if th.cuda.is_available():  # DEBUG **
-            self.use_ddp = True
-            logger.log(f"Device: {dist_util.dev()}")
-
-            self.ddp_model = self.model
+        if th.cuda.is_available():
+            self.use_ddp = False
+            print(dist_util.dev())
         else:
-            if dist.get_world_size() > 1:
+            if dist.is_initialized() and dist.get_world_size() > 1:
                 logger.warn(
                     "Distributed training requires CUDA. "
                     "Gradients will not be synchronized properly!"
                 )
             self.use_ddp = False
-            self.ddp_model = self.model
+
+        self.ddp_model = self.model
 
     def _load_and_sync_parameters(self):
-
-        pass
+        main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
+        if main_checkpoint in (None, '', 'none', 'None'):
+            return
+        if main_checkpoint and bf.exists(main_checkpoint):
+            self.resume_step = parse_resume_step_from_filename(main_checkpoint)
+            logger.log(f"Loading model from checkpoint: {main_checkpoint} (step {self.resume_step})")
+            state_dict = dist_util.load_state_dict(
+                actual_model_path(main_checkpoint), map_location=dist_util.dev()
+            )
+            self.model.load_state_dict(state_dict, strict=False)
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.master_params)
@@ -129,24 +132,33 @@ class TrainLoop:
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         ema_checkpoint = find_ema_checkpoint(main_checkpoint, self.resume_step, rate)
         if ema_checkpoint:
-            if dist.get_rank() == 0:
+            if not dist.is_initialized() or dist.get_rank() == 0:
                 logger.log(f"loading EMA from checkpoint: {ema_checkpoint}...")
                 state_dict = dist_util.load_state_dict(
                     actual_model_path(ema_checkpoint), map_location=dist_util.dev()
                 )
                 ema_params = self._state_dict_to_master_params(state_dict)
 
-        dist_util.sync_params(ema_params)
+        if dist.is_initialized():
+            dist_util.sync_params(ema_params)
         return ema_params
 
     def _load_optimizer_state(self):
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
-        if bf.exists(main_checkpoint):
-            logger.log(f"loading optimizer state from checkpoint: {main_checkpoint}")
+        if main_checkpoint in (None, '', 'none', 'None'):
+            return
+        opt_checkpoint = bf.join(
+            bf.dirname(main_checkpoint),
+            f"opt{self.resume_step:06d}.pt"
+        )
+        if bf.exists(opt_checkpoint):
+            logger.log(f"Loading optimizer state from: {opt_checkpoint}")
             state_dict = dist_util.load_state_dict(
-                actual_model_path(main_checkpoint), map_location=dist_util.dev()
+                actual_model_path(opt_checkpoint), map_location=dist_util.dev()
             )
             self.opt.load_state_dict(state_dict)
+        else:
+            logger.log(f"No optimizer state found at {opt_checkpoint} — starting with fresh optimizer")
 
     def _setup_fp16(self):
         self.master_params = make_master_params(self.model_params)
@@ -178,52 +190,49 @@ class TrainLoop:
         # expects (not the number of epochs). We iterate through the dataset
         # and stop once the requested number of steps is reached.
         data_iter = iter(self.data)
-        total = self.learning_steps if self.learning_steps else None
-        with tqdm(total=total, initial=self.step, desc="Training", unit="step") as pbar:
-            # expose pbar to other methods if needed
-            self.pbar = pbar
-            while (not self.learning_steps) or (self.step < self.learning_steps):
+        eval_iter = iter(self.eval_data) if self.eval_data is not None else None
+        from tqdm import tqdm
+
+        remaining = self.learning_steps - self.resume_step
+        pbar = tqdm(total=remaining, desc="Training", unit="step",
+                   dynamic_ncols=True, smoothing=0.1)
+        pbar.update(self.step)
+
+        while (not self.learning_steps) or (self.step + self.resume_step < self.learning_steps):
+            try:
+                image, cond = next(data_iter)
+            except StopIteration:
+                data_iter = iter(self.data)
+                image, cond = next(data_iter)
+
+            self.run_step(image, cond)
+
+            if 'loss' in logger.get_current().name2val:
+                avg_loss = float(logger.get_current().name2val['loss'])
+                pbar.set_postfix({'loss': f'{avg_loss:.4f}'}, refresh=False)
+
+            if self.step % self.log_interval == 0:
+                logger.dumpkvs()
+            if eval_iter is not None and self.step > 0 and self.step % self.eval_interval == 0:
                 try:
-                    image, cond = next(data_iter)
+                    batch_eval, cond_eval = next(eval_iter)
                 except StopIteration:
-                    # Recreate the iterator when the dataset is exhausted
-                    data_iter = iter(self.data)
-                    image, cond = next(data_iter)
-                try:
-                    self.run_step(image, cond)
-                except Exception:
-                    # ensure progressbar closes on exception, then re-raise
+                    eval_iter = iter(self.eval_data)
+                    batch_eval, cond_eval = next(eval_iter)
+                self.forward_only(batch_eval, cond_eval)
+                pbar.write(f'Step {self.step}: eval loss logged')
+                logger.dumpkvs()
+            if self.step > 0 and self.step % self.save_interval == 0:
+                self.save()
+                pbar.write(f'💾 Step {self.step}: Checkpoint saved')
+                # Run for a finite amount of time in integration tests.
+                if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                     pbar.close()
-                    raise
+                    return
+            self.step += 1
+            pbar.update(1)
 
-                # periodic logging (existing behaviour)
-                if self.step % self.log_interval == 0:
-                    logger.dumpkvs()
-                if self.eval_data is not None and self.step % self.eval_interval == 0:
-                    batch_eval, cond_eval = next(self.eval_data)
-                    self.forward_only(batch_eval, cond_eval)
-                    logger.dumpkvs()
-                if self.step > 0 and self.step % self.save_interval == 0:
-                    self.save()
-                    if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
-                        pbar.close()
-                        return
-
-                # update step counter and progressbar
-                self.step += 1
-                pbar.update(1)
-                # set postfix with latest loss and lr if available
-                postfix = {}
-                if self.last_loss is not None:
-                    postfix["loss"] = f"{self.last_loss:.4f}"
-                try:
-                    postfix["lr"] = f"{self.opt.param_groups[0]['lr']:.3e}"
-                except Exception:
-                    pass
-                # Avoid forcing a full refresh each step to keep output stable.
-                pbar.set_postfix(postfix, refresh=False)
-            # clear pbar reference when done
-            self.pbar = None
+        pbar.close()
         # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:
             self.save()
@@ -240,83 +249,60 @@ class TrainLoop:
         with th.no_grad():
             zero_grad(self.model_params)
             for i in range(0, image.shape[0], self.microbatch):
-                image = image[i: i + self.microbatch].to(dist_util.dev())
-                del cond['image_name']
-                cond = {
+                micro_image = image[i: i + self.microbatch].to(dist_util.dev())
+                micro_cond = {
                     k: v[i: i + self.microbatch].to(dist_util.dev())
                     for k, v in cond.items()
+                    if k != 'image_name'
                 }
-                last_batch = (i + self.microbatch) >= image.shape[0]
-                # image = image.to(dist_util.dev())
-                # del cond['qid']
-                # del cond['img_id']
-                micro_cond = {
-                    k: v.to(dist_util.dev())
-                    for k, v in cond.items()
-                }
-                # last_batch = (i + self.microbatch) >= image.shape[0]
-                t, weights = self.schedule_sampler.sample(image.shape[0], dist_util.dev())
-                # print(micro_cond.keys())
+                t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
                 compute_losses = functools.partial(
                     self.diffusion.training_losses,
                     self.ddp_model,
-                    image,
+                    micro_image,
                     t,
-                    model_kwargs=cond,
-
+                    model_kwargs=micro_cond,
                 )
-
-                # if last_batch or not self.use_ddp:
                 losses = compute_losses()
-                # else:
-                #     with self.ddp_model.no_sync():
-                #         losses = compute_losses()
-                loss = (losses["loss"] * weights).mean()
-                self.last_loss = float(loss.detach().item())
                 log_loss_dict(
                     self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()}
                 )
-                # Avoid printing directly to stdout; use logger (dumped at log_interval) and last_loss for tqdm postfix.
-                logger.logkv_mean("eval_loss", float(loss.detach().item()))
 
     def forward_backward(self, image, cond):
         zero_grad(self.model_params)
+        num_microbatches = max(1, image.shape[0] // self.microbatch)
         for i in range(0, image.shape[0], self.microbatch):
-            image = image[i: i + self.microbatch].to(dist_util.dev())
-            del cond['image_name']
-            cond = {
+            micro_image = image[i: i + self.microbatch].to(dist_util.dev())
+            micro_cond = {
                 k: v[i: i + self.microbatch].to(dist_util.dev())
                 for k, v in cond.items()
+                if k != 'image_name'
             }
-            t, weights = self.schedule_sampler.sample(image.shape[0], dist_util.dev())
+            t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
                 self.ddp_model,
-                image,
+                micro_image,
                 t,
-                model_kwargs=cond,
+                model_kwargs=micro_cond,
             )
-
             losses = compute_losses()
-            # else:
-            #     with self.ddp_model.no_sync():
-            #         losses = compute_losses()
 
-        if isinstance(self.schedule_sampler, LossAwareSampler):
-            self.schedule_sampler.update_with_local_losses(
-                t, losses["loss"].detach()
+            if isinstance(self.schedule_sampler, LossAwareSampler):
+                self.schedule_sampler.update_with_local_losses(
+                    t, losses["loss"].detach()
+                )
+
+            # Scale loss by microbatch count so gradients accumulate correctly
+            loss = (losses["loss"] * weights).mean() / num_microbatches
+            log_loss_dict(
+                self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
-
-        loss = (losses["loss"] * weights).mean()
-        self.last_loss = float(loss.detach().item())
-        log_loss_dict(
-            self.diffusion, t, {k: v * weights for k, v in losses.items()}
-        )
-        if self.use_fp16:
-            loss_scale = 2 ** self.lg_loss_scale
-            (loss * loss_scale).backward()
-        else:
-            loss.backward()
+            if self.use_fp16:
+                loss_scale = 2 ** self.lg_loss_scale
+                (loss * loss_scale).backward()
+            else:
+                loss.backward()
 
     def optimize_fp16(self):
         if any(not th.isfinite(p.grad).all() for p in self.model_params):
@@ -377,8 +363,9 @@ class TrainLoop:
     def _anneal_lr(self):
         if not self.learning_steps:
             return
+        import math
         frac_done = (self.step + self.resume_step) / self.learning_steps
-        lr = self.lr * (1 - frac_done)
+        lr = self.lr * 0.5 * (1 + math.cos(math.pi * frac_done))
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
 
@@ -397,8 +384,8 @@ class TrainLoop:
                 filename = f"model{(self.step + self.resume_step):06d}.pt"
             else:
                 filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
-            logger.log(f"writing to {bf.join(get_blob_logdir(), filename)}")
-            logger.log(f"writing to {bf.join(self.checkpoint_path, filename)}")
+            print('writing to', bf.join(get_blob_logdir(), filename))
+            print('writing to', bf.join(self.checkpoint_path, filename))
             # with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
             #     th.save(state_dict, f)
             with bf.BlobFile(bf.join(self.checkpoint_path, filename), "wb") as f:  # DEBUG **
@@ -408,6 +395,13 @@ class TrainLoop:
         # save_checkpoint(0, self.master_params)
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
+
+        # Save optimizer state alongside model checkpoint
+        opt_filename = f"opt{(self.step + self.resume_step):06d}.pt"
+        opt_path = bf.join(self.checkpoint_path, opt_filename)
+        logger.log(f"saving optimizer state to {opt_path}...")
+        with bf.BlobFile(opt_path, "wb") as f:
+            th.save(self.opt.state_dict(), f)
 
     def _master_params_to_state_dict(self, master_params):
         if self.use_fp16:
@@ -430,13 +424,14 @@ class TrainLoop:
 
 def parse_resume_step_from_filename(filename):
     """
-    Parse filenames of the form path/to/modelNNNNNN.pt, where NNNNNN is the
-    checkpoint's number of steps.
+    Parse filenames of the form path/to/ema_RATE_NNNNNN.pt or modelNNNNNN.pt.
     """
-    if filename[-3:] == '.pt':
-        return int(filename[-9:-3])
-    else:
-        return 0
+    import re
+    basename = os.path.basename(filename)
+    m = re.search(r'(\d{6})\.pt$', basename)
+    if m:
+        return int(m.group(1))
+    return 0
 
 
 def get_blob_logdir():

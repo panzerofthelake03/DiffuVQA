@@ -49,7 +49,8 @@ def main():
     set_seed(args.seed)
     
     # dist_util.setup_dist()
-    logger.configure()
+    os.makedirs(args.checkpoint_path, exist_ok=True)
+    logger.configure(dir=args.checkpoint_path, format_strs=["log", "csv"])
     logger.log("### Creating data loader...")
     start_t = time.time()
     tokenizer = load_tokenizer(args)
@@ -107,7 +108,7 @@ def main():
         diffusion=diffusion,
         data=data,
         batch_size=args.batch_size,
-        microbatch=0,
+        microbatch=args.microbatch,
         lr=args.lr,
         ema_rate=args.ema_rate,
         log_interval=args.log_interval,

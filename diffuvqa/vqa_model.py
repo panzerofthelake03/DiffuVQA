@@ -24,19 +24,6 @@ from diffuvqa.utils.answer_pre import find_most_similar_answers
 ##############################################################
 ###########  vision and text feature fusion     #############
 #############################################################
-class Pooler(nn.Module):
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.dense = nn.Linear(hidden_size, hidden_size)
-        self.activation = nn.Tanh()
-
-    def forward(self, hidden_states):
-        first_token_tensor = hidden_states[:, 0]
-        pooled_output = self.dense(first_token_tensor)
-        pooled_output = self.activation(pooled_output)
-        return pooled_output
-
-
 class CVAE(nn.Module):
     def __init__(self, embedding_dim):
         super(CVAE, self).__init__()
@@ -87,12 +74,15 @@ class feature_fusion(nn.Module):
         self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
 
-        # Project raw vision encoder channel features to the configured image embedding size.
-        # Historically this code used 145 as the number of channels produced by
-        # the pretrained CLIP/resnet visual backbone; keep that here for
-        # compatibility with pre-trained weights. If you use a different visual
-        # backbone adjust this number accordingly.
-        self.image_MLP = nn.Linear(145, args.input_image_embed_size)
+        # Dynamically determine the channel dimension produced by the vision encoder
+        # by running a single dummy forward pass. This avoids the hardcoded 145 and
+        # works for any CLIP/ResNet backbone without manual config changes.
+        with torch.no_grad():
+            _dummy = torch.zeros(1, 3, args.image_resolution, args.image_resolution)
+            _out = self.vision_encoder(_dummy)          # [1, C, L]
+            _vision_channels = _out.shape[1]
+
+        self.image_MLP = nn.Linear(_vision_channels, args.input_image_embed_size)
         self.image_MLP.apply(self.init_weights)
 
         # modality type embeddings (0=text,1=image)
@@ -138,15 +128,23 @@ class feature_fusion(nn.Module):
         q_ids = cond.pop('input_q_id')
         q_mask = (q_ids != 0).long().to(q_ids.device)
         q_input_shape = q_mask.size()
-        question_emb = self.language_encoder(q_ids)
+
+        # Full BERT input = token_emb + position_emb + token_type_emb + LayerNorm + Dropout
+        # Previously only token embeddings were passed to the encoder, making
+        # pretrained positional and token-type information unavailable to the model.
+        token_emb = self.language_encoder(q_ids)
+        seq_len = q_ids.size(1)
+        position_ids = torch.arange(seq_len, dtype=torch.long, device=q_ids.device).unsqueeze(0)
+        token_type_ids = torch.zeros_like(q_ids)
+        position_emb = self.bert.embeddings.position_embeddings(position_ids)
+        token_type_emb = self.bert.embeddings.token_type_embeddings(token_type_ids)
+        question_emb = self.bert.embeddings.LayerNorm(token_emb + position_emb + token_type_emb)
+        question_emb = self.bert.embeddings.dropout(question_emb)
+
         extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, dtype=question_emb.dtype)
         for layer in self.bert.encoder.layer:
             question_feats = layer(question_emb, extended_q_masks)[0]
-        question_feats = self.question_feature_proj(question_feats)  # B 32 768
-
-        # print("q:", question_feats.shape)
-
-        # question_feats = self.question_feature_proj(question_feats)
+        question_feats = self.question_feature_proj(question_feats)
 
         # == Image Encoding ==
         image_feats = self.vision_encoder(image)
@@ -184,26 +182,24 @@ class feature_fusion(nn.Module):
         f3 = self.layer_norm(f3)
         f4 = self.feature_proj(f3)
 
-        # Ensure q_for_image is defined and all tensors have the same sequence length
-        # by pooling-and-expanding the shorter sequences to match image_feats.
-        if 'q_for_image' not in locals():
-            # Create q_for_image by pooling question tokens and expanding to image length
-            if question_feats.size(1) != image_feats.size(1):
-                q_for_image = question_feats.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
-            else:
-                q_for_image = question_feats
+        # Canonical length is question_feats.size(1) == seq_len.
+        # All tensors must be aligned to this length before combining so that
+        # the returned fuse_feats always has shape [B, seq_len, hidden_dim].
+        target_len = question_feats.size(1)
 
-        # If f4 has a different sequence length, pool-and-expand it as well so
-        # the final element-wise combination works without size mismatch.
-        if f4.size(1) != image_feats.size(1):
-            f4 = f4.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
+        # q_for_image: question features projected to target_len (already target_len)
+        q_for_image = question_feats  # [B, target_len, H]
 
-        # Debug print (optional) controlled by environment variable DVQA_DEBUG
-        try:
-            if os.environ.get('DVQA_DEBUG', '0') == '1':
-                print(f"DEBUG feature_fusion shapes: f4 {tuple(f4.shape)}, image_feats {tuple(image_feats.shape)}, q_for_image {tuple(q_for_image.shape)}")
-        except Exception:
-            pass
+        # image_feats: pool to single vector then expand to target_len
+        if image_feats.size(1) != target_len:
+            image_feats = image_feats.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+
+        # f4 comes from cross/multi attention over question tokens — already target_len
+        if f4.size(1) != target_len:
+            f4 = f4.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+
+        assert f4.size(1) == image_feats.size(1) == q_for_image.size(1) == target_len, \
+            f"feature_fusion length mismatch: f4={f4.size(1)}, image={image_feats.size(1)}, q={q_for_image.size(1)}, target={target_len}"
 
         f = self.alpha * f4 + self.beta * image_feats + self.theta * q_for_image
         return f, pre_simu_answer_feats
@@ -260,9 +256,12 @@ class TransformerNetModel(nn.Module):
         self.hidden_size = config.hidden_size
 
         self.word_embedding = nn.Embedding(vocab_size, self.input_dims)
-        self.lm_head = nn.Linear(self.input_dims, vocab_size)
-        with th.no_grad():
-            self.lm_head.weight = self.word_embedding.weight
+        # lm_head is an independent projection — not tied to word_embedding.
+        # Tying forces word_embedding and lm_head to optimize against each other
+        # (diffusion pushes embeddings while NLL pulls them back toward vocab),
+        # which prevents the model from learning a stable answer manifold.
+        self.lm_head = nn.Linear(self.input_dims, vocab_size, bias=False)
+        nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.02)
 
         time_embed_dim = hidden_t_dim * 4
         self.time_embed = nn.Sequential(
@@ -312,11 +311,6 @@ class TransformerNetModel(nn.Module):
                 pass
             self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
 
-            with th.no_grad():
-                self.lm_head.weight = self.word_embedding.weight
-            # self.lm_head.weight.requires_grad = False
-            # self.word_embedding.weight.requires_grad = False
-
             self.input_transformers = temp_bert.encoder
             self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
             self.position_embeddings = temp_bert.embeddings.position_embeddings
@@ -325,8 +319,6 @@ class TransformerNetModel(nn.Module):
             # Project pretrained position embeddings to args.hidden_dim if needed
             try:
                 pos_dim = self.position_embeddings.weight.size(1)
-                # Project positional embeddings into the transformer's hidden
-                # size so they can be added to other transformer inputs.
                 target_dim = self.hidden_size
                 if pos_dim != target_dim:
                     self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
@@ -338,6 +330,82 @@ class TransformerNetModel(nn.Module):
 
             del temp_bert.embeddings
             del temp_bert.pooler
+
+        elif init_pretrained == 'pubmedbert':
+            print('initializing from pretrained PubMedBERT (medical domain)...')
+            print(config)
+
+            temp_bert = BertModel.from_pretrained('NeuML/pubmedbert-base-embeddings', config=config)
+
+            self.word_embedding = temp_bert.embeddings.word_embeddings
+            try:
+                bert_emb_dim = self.word_embedding.weight.size(1)
+                target_dim = self.hidden_size
+                if bert_emb_dim != target_dim:
+                    self.word_embedding_proj = nn.Linear(bert_emb_dim, target_dim)
+                    self.word_embedding_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.word_embedding_proj.bias is not None:
+                        self.word_embedding_proj.bias.data.zero_()
+            except Exception:
+                pass
+            self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
+
+            self.input_transformers = temp_bert.encoder
+            self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+            self.position_embeddings = temp_bert.embeddings.position_embeddings
+            self.LayerNorm = temp_bert.embeddings.LayerNorm
+
+            try:
+                pos_dim = self.position_embeddings.weight.size(1)
+                target_dim = self.hidden_size
+                if pos_dim != target_dim:
+                    self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
+                    self.position_embeddings_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.position_embeddings_proj.bias is not None:
+                        self.position_embeddings_proj.bias.data.zero_()
+            except Exception:
+                pass
+
+            del temp_bert.embeddings
+            del temp_bert.pooler
+
+        elif init_pretrained == 'roberta':
+            print('initializing from pretrained RoBERTa...')
+            print(config)
+
+            temp_roberta = RobertaModel.from_pretrained(config_name, config=config)
+
+            self.word_embedding = temp_roberta.embeddings.word_embeddings
+            try:
+                roberta_emb_dim = self.word_embedding.weight.size(1)
+                target_dim = self.hidden_size
+                if roberta_emb_dim != target_dim:
+                    self.word_embedding_proj = nn.Linear(roberta_emb_dim, target_dim)
+                    self.word_embedding_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.word_embedding_proj.bias is not None:
+                        self.word_embedding_proj.bias.data.zero_()
+            except Exception:
+                pass
+            self.fuse = feature_fusion(self.word_embedding, temp_roberta, args)
+
+            self.input_transformers = temp_roberta.encoder
+            self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+            self.position_embeddings = temp_roberta.embeddings.position_embeddings
+            self.LayerNorm = temp_roberta.embeddings.LayerNorm
+
+            try:
+                pos_dim = self.position_embeddings.weight.size(1)
+                target_dim = self.hidden_size
+                if pos_dim != target_dim:
+                    self.position_embeddings_proj = nn.Linear(pos_dim, target_dim)
+                    self.position_embeddings_proj.weight.data.normal_(mean=0.0, std=0.02)
+                    if self.position_embeddings_proj.bias is not None:
+                        self.position_embeddings_proj.bias.data.zero_()
+            except Exception:
+                pass
+
+            del temp_roberta.embeddings
+            del temp_roberta.pooler
 
         elif init_pretrained == 'no':
             self.input_transformers = BertEncoder(config)

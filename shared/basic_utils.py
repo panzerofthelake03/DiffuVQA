@@ -24,24 +24,29 @@ class myTokenizer():
             # save
             tokenizer.save_pretrained(args.checkpoint_path)
             print('save tokenizer to', args.checkpoint_path)
-            
+        elif args.vocab == 'pubmedbert':
+            # Use PubMedBERT tokenizer for medical domain
+            tokenizer = AutoTokenizer.from_pretrained("NeuML/pubmedbert-base-embeddings")
+            self.tokenizer = tokenizer
+            self.sep_token_id = tokenizer.sep_token_id
+            self.pad_token_id = tokenizer.pad_token_id
+            # save
+            tokenizer.save_pretrained(args.checkpoint_path)
+            print('save PubMedBERT tokenizer to', args.checkpoint_path)
         elif args.vocab == 'bio-bert':
             tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
             tokenizer.save_pretrained(args.checkpoint_path)
-            print('save tokenizer to', args.checkpoint_path)
-        
+            print('save BioBERT tokenizer to', args.checkpoint_path)
         elif args.vocab == 'roberta':
-            # Load RoBERTa tokenizer
             tokenizer = AutoTokenizer.from_pretrained("roberta-large")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
-            # save
             tokenizer.save_pretrained(args.checkpoint_path)
-            print('save tokenizer to', args.checkpoint_path)
+            print('save RoBERTa tokenizer to', args.checkpoint_path)
         else: 
             # load vocab from the path
             print('#'*30, 'load vocab from', args.vocab)
@@ -97,10 +102,8 @@ def load_model_emb(args, tokenizer):
         try:
             model.load_state_dict(torch.load(path_save))
         except RuntimeError as e:
-            # Handle vocab size mismatch (e.g., switching from BERT to RoBERTa)
             if "size mismatch" in str(e):
                 print(f"Warning: Embedding size mismatch. Reinitializing embeddings.")
-                print(f"  Old checkpoint vocab size likely doesn't match current tokenizer")
                 print(f"  Current tokenizer vocab size: {tokenizer.vocab_size}")
                 torch.nn.init.normal_(model.weight)
                 torch.save(model.state_dict(), path_save)
@@ -149,40 +152,30 @@ def create_model_and_diffusion(args):
         model = TransformerNet(args=args)
 
     elif args.model == 'transformer-bert':
-        model =  TransformerNetModel(
-        input_dims=768,
-        output_dims=768,
-        hidden_t_dim=128,
-        dropout=0.1,
-        config_name="bert-base-uncased",
-        vocab_size=30522,
-        init_pretrained="bert",
-        args=args
-    )
-        
-    elif args.model == 'transformer-bio-bert':
-        model =  TransformerNetModel(
-        input_dims=768,
-        output_dims=768,
-        hidden_t_dim=128,
-        dropout=0.1,
-        config_name="dmis-lab/biobert-v1.1",
-        vocab_size=28996,
-        init_pretrained="bert",
-        args=args
-    )
+        # Derive PLM from use_plm_init; fall back to vocab if not explicitly set
+        _plm = getattr(args, 'use_plm_init', None)
+        if not _plm or _plm not in ('bert', 'pubmedbert'):
+            _vocab = getattr(args, 'vocab', 'bert')
+            if _vocab == 'pubmedbert':
+                _plm = 'pubmedbert'
+            else:
+                _plm = 'bert'
+        if _plm == 'pubmedbert':
+            _config_name = 'NeuML/pubmedbert-base-embeddings'
+        else:
+            _config_name = 'bert-base-uncased'
+            _plm = 'bert'
 
-    elif args.model == 'transformer-roberta':
         model = TransformerNetModel(
-        input_dims=1024,
-        output_dims=1024,
-        hidden_t_dim=128,
-        dropout=0.1,
-        config_name="roberta-large",
-        vocab_size=50265,
-        init_pretrained="roberta",
-        args=args
-    )
+            input_dims=args.hidden_dim,
+            output_dims=args.hidden_dim,
+            hidden_t_dim=args.hidden_t_dim,
+            dropout=args.dropout,
+            config_name=_config_name,
+            vocab_size=args.vocab_size,
+            init_pretrained=_plm,
+            args=args
+        )
 
     betas = gd.get_named_beta_schedule(args.noise_schedule, args.diffusion_steps)
 
