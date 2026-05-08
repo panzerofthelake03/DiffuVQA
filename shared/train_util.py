@@ -116,6 +116,8 @@ class TrainLoop:
 
     def _load_and_sync_parameters(self):
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
+        if main_checkpoint in (None, '', 'none', 'None'):
+            return
         if main_checkpoint and bf.exists(main_checkpoint):
             self.resume_step = parse_resume_step_from_filename(main_checkpoint)
             logger.log(f"Loading model from checkpoint: {main_checkpoint} (step {self.resume_step})")
@@ -143,7 +145,7 @@ class TrainLoop:
 
     def _load_optimizer_state(self):
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
-        if main_checkpoint is None:
+        if main_checkpoint in (None, '', 'none', 'None'):
             return
         opt_checkpoint = bf.join(
             bf.dirname(main_checkpoint),
@@ -421,13 +423,14 @@ class TrainLoop:
 
 def parse_resume_step_from_filename(filename):
     """
-    Parse filenames of the form path/to/modelNNNNNN.pt, where NNNNNN is the
-    checkpoint's number of steps.
+    Parse filenames of the form path/to/ema_RATE_NNNNNN.pt or modelNNNNNN.pt.
     """
-    if filename[-3:] == '.pt':
-        return int(filename[-9:-3])
-    else:
-        return 0
+    import re
+    basename = os.path.basename(filename)
+    m = re.search(r'(\d{6})\.pt$', basename)
+    if m:
+        return int(m.group(1))
+    return 0
 
 
 def get_blob_logdir():
