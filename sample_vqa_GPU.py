@@ -371,7 +371,8 @@ def main():
                 seq_ids = seq_ids.to(th.device("cpu"))
                 seq_list = seq_ids.tolist()
                 first_stop = next((i for i, t in enumerate(seq_list) if t in stop_ids), len(seq_list))
-                seq_cut = seq_ids[:first_stop]
+                # decode_token expects shape [seq_len, 1] or [seq_len], keep a safe 2D shape.
+                seq_cut = seq_ids[:first_stop].unsqueeze(-1)
                 tokens = tokenizer.decode_token(seq_cut)
                 word_lst_recover.append(tokens)
 
