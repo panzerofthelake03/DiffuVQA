@@ -92,12 +92,7 @@ class TrainLoop:
 
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
         if self.resume_step:
-            opt_loaded = self._load_optimizer_state()
-            if (not opt_loaded) and self.learning_steps:
-                frac_done = (self.step + self.resume_step) / self.learning_steps
-                lr = self.lr * max(1 - frac_done, 0.1)
-                for param_group in self.opt.param_groups:
-                    param_group["lr"] = lr
+            self._load_optimizer_state()
             # Model was resumed, either due to a restart or a checkpoint
             # being specified at the command line.
             self.ema_params = [
@@ -385,8 +380,21 @@ class TrainLoop:
     def _anneal_lr(self):
         if not self.learning_steps:
             return
+        import math
         frac_done = (self.step + self.resume_step) / self.learning_steps
-        lr = self.lr * max(1 - frac_done, 0.1)
+        
+        # Warmup + Cosine with LR floor
+        warmup_frac = 0.03  # ~4500 steps for 150k total
+        lr_min = self.lr * 0.05  # LR floor at 5% of base LR
+        
+        if frac_done < warmup_frac:
+            # Linear warmup phase
+            lr = self.lr * (frac_done / warmup_frac)
+        else:
+            # Cosine decay phase with floor
+            cosine_frac = (frac_done - warmup_frac) / (1 - warmup_frac)
+            lr = lr_min + (self.lr - lr_min) * 0.5 * (1 + math.cos(math.pi * cosine_frac))
+        
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
 
