@@ -2,8 +2,10 @@
 
 ## Aktif Görevler
 
-- [ ] Sıfırdan yeniden eğitim başlat — 150k step, diffusion_steps=2000, batch=64, LR=0.000283 (A100) — tüm BUG 11-13 + LR/EMA iyileştirmeleriyle
-- [ ] Chatbot arayüzü tasarla ve implemente et
+- [ ] Bert 150k eğitimi tamamlanınca sampling yap ve sonuçları değerlendir (30k'da ara test önerilir)
+- [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
+- [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (150k sonrası)
+- [ ] Sonraki training run için Seçenek 2 uygula — `gaussian_diffusion.py` training_losses'da padding mask ile loss masking
 
 ## Tamamlanan Görevler
 
@@ -48,3 +50,7 @@
 - [x] `train_util.py` — Resume init'teki hatalı lineer LR hesabı kaldırıldı (optimizer state zaten doğru LR'ı yükleyecek)
 - [x] `train_util.py` — LR scheduler: warmup (ilk %3) + cosine decay + lr_min floor (lr*0.05) eklendi
 - [x] `train_util.py` — Dinamik EMA rate: ilk 10k adımda `1 - 1/(step+1)` ile kademeli ısınma
+- [x] `train.py` — `parse_known_args` ile bilinmeyen argümanlar warning olarak loglanıyor, crash yok
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — 150k full training config güncellendi (LR=0.000283, batch=64, diffusion=2000, seq_len=64)
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — Resume checkpoint yapısı PubMedBERT ile birebir hizalandı
+- [x] `sample_vqa_GPU.py` — Post-processing pipeline eklendi: SEP/PAD kesme (Seçenek 1) + confidence threshold (Seçenek 3) + MBR `--num_samples` (Seçenek 4)
