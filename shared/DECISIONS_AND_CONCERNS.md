@@ -131,3 +131,14 @@
 - Reason: Bio-Bert and PubMedBERT repos appear to share workflow patterns, so the same class of failures may exist there too.
 - Concern: Applying only the Bio-Bert fix set can leave PubMedBERT results inconsistent and invalidate branch-to-branch comparisons.
 - Follow-up: Run the prepared audit-and-fix prompt against the PubMedBERT repo and compare checkpoint compatibility rules before new experiments.
+
+## 2026-05-10
+
+### Decision 17: Add inference-time reliable span extraction with confidence filtering
+- File: sample_vqa_GPU.py
+- Change: Added confidence_threshold runtime arg to decode defaults (default 0.3).
+- Change: Added per-position max probability computation from model logits and masked low-confidence predicted tokens to PAD before decoding.
+- Change: Added post-processing stop rule to decode only until first SEP or PAD token, yielding the shortest reliable answer span.
+- Reason: Generated answers were often overlong; this fix trims noisy tails without retraining and is compatible with existing checkpoints.
+- Concern: Threshold sensitivity can affect recall vs precision tradeoff, especially for weaker checkpoints.
+- Follow-up: Run threshold sweep at 0.2, 0.3, 0.4 and compare empty-answer rate, exact match, and qualitative answer brevity.

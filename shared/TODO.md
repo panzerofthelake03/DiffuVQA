@@ -33,6 +33,12 @@ Validation snapshot:
 - [x] Added fail-fast checkpoint/runtime validation in sample_vqa_GPU.py for conflicting model/vocab/config_name/use_plm_init metadata.
 - [x] Updated Colab notebook model selection to use MODEL_PRESET_KEY and derived runtime fields.
 - [x] Added Colab preflight smoke test before training and sampling smoke test before actual sampling.
+- [x] Added inference confidence thresholding in sample_vqa_GPU.py to map low-confidence tokens to PAD before decode.
+- [x] Added shortest reliable span decode in sample_vqa_GPU.py by truncating generation at first SEP or PAD.
+
+Validation snapshot (2026-05-10):
+- Command: c:/Users/BARIS/Documents/GitHub/DiffuVQA/.venv/Scripts/python.exe -m py_compile sample_vqa_GPU.py
+- Result: compile check passed with no syntax errors after Option 1 + 3 patch.
 
 ## Phase 1: Model Training and Optimization
 
