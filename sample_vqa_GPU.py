@@ -63,7 +63,7 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 
 def create_argparser():
     defaults = dict(model_path='', step=2500, out_dir='', top_p=0)
-    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False)
+    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False, confidence_threshold=0.3)
     defaults.update(load_defaults_config())
     defaults.update(decode_defaults)
     parser = argparse.ArgumentParser()
@@ -338,9 +338,17 @@ def main():
             cands = th.topk(logits, k=1, dim=-1)
 
             probs = th.softmax(logits, dim=-1)
+            max_probs = probs.max(dim=-1).values
             chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
             seq_confidence = chosen_probs.mean(dim=1)
             seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
+
+            # Mask low-confidence positions to PAD before decoding.
+            conf_threshold = float(getattr(args, 'confidence_threshold', 0.3))
+            pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+            sep_id = tokenizer.sep_token_id
+            token_ids = cands.indices.squeeze(-1).clone()
+            token_ids = token_ids.masked_fill(max_probs < conf_threshold, pad_id)
 
             try:
                 sample_flat = sample.contiguous().view(-1, sample.size(-1))
@@ -356,9 +364,15 @@ def main():
 
             # debug tensor printing removed to avoid huge outputs that clutter/overwrite
             # the terminal during long runs.
-            for seq, input_mask in zip(cands.indices, input_ids_mask_ori):
-                seq = seq.to(th.device("cpu"))
-                tokens = tokenizer.decode_token(seq)
+            stop_ids = {pad_id}
+            if sep_id is not None:
+                stop_ids.add(sep_id)
+            for seq_ids in token_ids:
+                seq_ids = seq_ids.to(th.device("cpu"))
+                seq_list = seq_ids.tolist()
+                first_stop = next((i for i, t in enumerate(seq_list) if t in stop_ids), len(seq_list))
+                seq_cut = seq_ids[:first_stop]
+                tokens = tokenizer.decode_token(seq_cut)
                 word_lst_recover.append(tokens)
 
             for seq, input_mask in zip(input_ids_x, input_ids_mask_ori):
