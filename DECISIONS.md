@@ -4,6 +4,38 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+## 2026-05-10
+
+### [KARAR] `sample_vqa_GPU.py` — SEP/PAD kesme + confidence threshold + MBR eklendi
+**Değişiklik:** Üretilen sequence post-processing pipeline'ı eklendi:
+
+**Seçenek 1 — SEP/PAD kesme:** Her üretilen sequence'te ilk `[SEP]` veya `[PAD]` token'ına kadar kes. Model seq_len kadar token üretmek zorunda olduğu için gereksiz trailing noise bu şekilde temizlenir.
+
+**Seçenek 3 — Confidence threshold:** SEP/PAD bulunamadıysa (model henüz bunu öğrenmemişse) trailing token'ları arasında confidence < 0.3 olanları sil. Gürültüyü kısmen temizler, yeniden eğitim gerektirmez.
+
+**Seçenek 4 — MBR (Minimum Bayes Risk):** `--num_samples N` ile N adet sample üretilip ortalama embedding'e L2 mesafesi en düşük olanı seç. N=1'de mevcut davranış korunur. N>1'de kalite artar, latency N katına çıkar — chatbot için N=1, offline eval için N=3-5 önerilir.
+
+**Neden:** JSONL analizi gösterdi ki doğru cevap token'ı örneklerin %29'unda üretilmiş ama 15-20 token'lık gürültü arasına gömülmüş. Exact match 0 ama contains %29. Bu post-processing pipeline exact match'i artırmayı hedefliyor.
+
+**Endişe:** SEP/PAD kesme, model bu token'ları üretmeyi öğrenmemişse etkisiz kalır. 150k checkpoint'te test edilmeli. Kalıcı çözüm Seçenek 2 (aşağıda).
+
+---
+
+### [BEKLEYEN KARAR] Seçenek 2 — Training'de padding mask ile loss masking (Sonraki Run)
+**Değişiklik (henüz uygulanmadı):** `gaussian_diffusion.py` `training_losses` içinde MSE loss'u gerçek cevap uzunluğuyla maskele — padding token pozisyonlarına loss ağırlığı 0 ver:
+```python
+ans_len_mask = (token_ids != pad_id).float()  # [B, seq_len]
+terms["mse"] = mean_flat((ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1))
+```
+
+**Neden uygulanmadı:** Mevcut 150k run devam ediyor. Bu değişiklik yeniden eğitim gerektirir — mevcut checkpoint'lerle uyumsuz.
+
+**Ne zaman uygulanmalı:** 150k run tamamlanıp sonuçlar değerlendirildikten sonra, bir sonraki training run başlamadan önce uygulanmalı.
+
+**Beklenen etki:** Model kısa cevaplar için doğal olarak erken durur, SEP/PAD üretmeyi öğrenir. Post-processing pipeline'ına olan bağımlılık azalır.
+
+---
+
 ## 2026-05-09
 
 ### [KARAR] `train_util.py` — Resume init'teki hatalı LR hesabı kaldırıldı
