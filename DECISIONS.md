@@ -4,6 +4,45 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+## 2026-05-09
+
+### [KARAR] `train_util.py` — Resume init'teki hatalı LR hesabı kaldırıldı
+**Değişiklik:** `__init__` içinde resume durumunda `lr = self.lr * (1 - frac_done)` ile yeni bir AdamW oluşturma bloğu kaldırıldı. Artık tek bir `AdamW(lr=self.lr)` oluşturuluyor, ardından `_load_optimizer_state()` checkpoint'teki optimizer state'i (LR dahil) yüklüyor.
+
+**Neden:** `_load_optimizer_state()` optimizer'ın tüm state'ini (momentum, LR, param_groups) üzerine yazıyor. Önceki blok hem yanlış formül (lineer decay) kullanıyor hem de anlamsız bir AdamW ikinci kez oluşturuyordu. İlk `_anneal_lr` çağrısı zaten cosine LR'ı set edecek.
+
+---
+
+### [KARAR] `train_util.py` — LR: Warmup + Cosine Decay + Floor eklendi
+**Değişiklik:** `_anneal_lr` üç bölgeli schedule'a geçirildi:
+- **Warmup:** İlk `%3` adımda (150k için ~4500 adım) LR 0'dan `lr_base`'e lineer ısınma
+- **Cosine decay:** Geriye kalan adımlarda `lr_min`'den `lr_base`'e cosine
+- **Floor:** `lr_min = lr_base * 0.05` — LR sıfıra inmiyor, son adımlarda optimizer donmuyor
+
+**Neden warmup:** Eğitim başında random init'li ağırlıklarla yüksek LR büyük gradyan patlamalarına yol açıyor. Embedding manifoldu yanlış yöne oturabilir — Med-VQA gibi küçük veri setlerinde bu özellikle zararlı.
+
+**Neden floor:** Eski cosine `t/T=1`'de LR=0'a iniyor. Son adımlarda optimizer neredeyse güncelleme yapmıyordu. `lr_min = 0.05 * lr_base` ile son adımlarda da ince güncelleme devam ediyor.
+
+**Endişe:** Resume durumunda `frac_done` checkpoint adımından hesaplanıyor. Warmup zaten geçilmişse otomatik olarak cosine bölgesine giriyor — resume davranışı tutarlı.
+
+---
+
+### [KARAR] `train_util.py` — Dinamik EMA rate (warmup) eklendi
+**Değişiklik:** `_ema_rate(target_rate)` metodu eklendi. İlk 10k adımda `min(target_rate, 1 - 1/(step+1))` formülüyle EMA rate kademeli olarak hedef değere (`0.9999`) ısınıyor. 10k adım sonrası sabit `target_rate`.
+
+**Neden:** `ema_rate=0.9999` ile step=1'de EMA neredeyse tamamen eski (random init) ağırlıklara ağırlık veriyor: `new_ema = 0.9999 * random_init + 0.0001 * updated`. İlk binlerce adımda EMA shadow modeli anlamlı güncellemeleri absorbe edemez.
+
+**Formül davranışı:**
+- step=1: rate = min(0.9999, 0.5) = 0.5 (50/50 mix)
+- step=9: rate = min(0.9999, 0.9) = 0.9
+- step=99: rate = min(0.9999, 0.99) = 0.99
+- step=999: rate = min(0.9999, 0.999) = 0.999
+- step≥10000: rate = 0.9999 (hedef)
+
+**Endişe:** Checkpoint'e kaydedilen EMA ağırlıkları ilk 10k adımda daha az smooth. Bu özellikle erken checkpoint'lerde (5k, 10k) inference kalitesini etkileyebilir. 50k+ adım için önemsiz.
+
+---
+
 ## 2026-05-06
 
 ### [KARAR] `efficient_sample.py` silindi

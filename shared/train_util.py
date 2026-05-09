@@ -89,9 +89,6 @@ class TrainLoop:
 
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
         if self.resume_step:
-            frac_done = (self.step + self.resume_step) / self.learning_steps
-            lr = self.lr * (1 - frac_done)
-            self.opt = AdamW(self.master_params, lr=lr, weight_decay=self.weight_decay)
             self._load_optimizer_state()
             self.ema_params = [
                 self._load_ema_parameters(rate) for rate in self.ema_rate
@@ -316,7 +313,7 @@ class TrainLoop:
         self._anneal_lr()
         self.opt.step()
         for rate, params in zip(self.ema_rate, self.ema_params):
-            update_ema(params, self.master_params, rate=rate)
+            update_ema(params, self.master_params, rate=self._ema_rate(rate))
         master_params_to_model_params(self.model_params, self.master_params)
         self.lg_loss_scale += self.fp16_scale_growth
 
@@ -343,11 +340,9 @@ class TrainLoop:
             self.grad_clip()
         self._log_grad_norm()
         self._anneal_lr()
-        # scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=20000, gamma=0.1)
         self.opt.step()
-        # scheduler.step()
         for rate, params in zip(self.ema_rate, self.ema_params):
-            update_ema(params, self.master_params, rate=rate)
+            update_ema(params, self.master_params, rate=self._ema_rate(rate))
 
     def _log_grad_norm(self):
         sqsum = 0.0
@@ -364,10 +359,27 @@ class TrainLoop:
         if not self.learning_steps:
             return
         import math
+        warmup_frac = 0.03
+        lr_min = self.lr * 0.05
         frac_done = (self.step + self.resume_step) / self.learning_steps
-        lr = self.lr * 0.5 * (1 + math.cos(math.pi * frac_done))
+
+        if frac_done < warmup_frac:
+            lr = self.lr * (frac_done / warmup_frac)
+        else:
+            cosine_frac = (frac_done - warmup_frac) / (1 - warmup_frac)
+            lr = lr_min + (self.lr - lr_min) * 0.5 * (1 + math.cos(math.pi * cosine_frac))
+
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
+
+    def _ema_rate(self, target_rate):
+        # Warmup EMA: ramp from 0.9 to target_rate over first 10k steps so
+        # early random-init weights don't pollute the EMA shadow copy.
+        step = self.step + self.resume_step
+        warmup_steps = 10000
+        if step < warmup_steps:
+            return min(target_rate, 1 - (1 / (step + 1)))
+        return target_rate
 
     def log_step(self):
         logger.logkv("step", self.step + self.resume_step)

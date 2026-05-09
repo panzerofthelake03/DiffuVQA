@@ -2,7 +2,7 @@
 
 ## Aktif Görevler
 
-- [ ] Sıfırdan yeniden eğitim başlat — 150k step, diffusion_steps=2000, batch=64, LR=0.000283 (A100) — tüm BUG 11-13 düzeltmeleriyle
+- [ ] Sıfırdan yeniden eğitim başlat — 150k step, diffusion_steps=2000, batch=64, LR=0.000283 (A100) — tüm BUG 11-13 + LR/EMA iyileştirmeleriyle
 - [ ] Chatbot arayüzü tasarla ve implemente et
 
 ## Tamamlanan Görevler
@@ -45,3 +45,6 @@
 - [x] BUG 13: `vqa_model.py` — `lm_head` weight tying kaldırıldı (bert/pubmedbert/roberta init bloklarında)
 - [x] BUG 13: `vqa_model.py` — `feature_fusion.forward()` BERT preprocessing düzeltildi (pozisyon + token_type embedding + LayerNorm + dropout)
 - [x] BUG 13: `gaussian_diffusion.py` — `pre_answer_loss` loss toplamından kaldırıldı
+- [x] `train_util.py` — Resume init'teki hatalı lineer LR hesabı kaldırıldı (optimizer state zaten doğru LR'ı yükleyecek)
+- [x] `train_util.py` — LR scheduler: warmup (ilk %3) + cosine decay + lr_min floor (lr*0.05) eklendi
+- [x] `train_util.py` — Dinamik EMA rate: ilk 10k adımda `1 - 1/(step+1)` ile kademeli ısınma
