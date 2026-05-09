@@ -60,7 +60,7 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 
 def create_argparser():
     defaults = dict(model_path='', step=2500, out_dir='', top_p=0)
-    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False, num_samples=1)
+    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False, confidence_threshold=0.3)
     defaults.update(load_defaults_config())
     defaults.update(decode_defaults)
     parser = argparse.ArgumentParser()
@@ -299,47 +299,44 @@ def main():
         # The actual sequence shape is determined by x_noised (fuse_len + seq_len).
         sample_shape = x_start.shape
 
-        # Seçenek 4: MBR — num_samples > 1 ise birden fazla sample üret, en tutarlısını seç
-        num_samples = getattr(args, 'num_samples', 1)
-        all_sample_candidates = []
-        for _ in range(num_samples):
-            _noise = th.randn_like(x_start)
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                _samples = sample_fn(
-                    model,
-                    sample_shape,
-                    noise=_noise,
-                    clip_denoised=args.clip_denoised,
-                    denoised_fn=partial(denoised_fn_round, args, model_emb),
-                    model_kwargs=model_kwargs,
-                    top_p=args.top_p,
-                    clamp_step=args.clamp_step,
-                    clamp_first=True,
-                    mask=input_ids_mask,
-                    x_start=x_start,
-                    gap=step_gap,
-                )
-            all_sample_candidates.append(_samples[-1])
+        # The diffusion sampling procedure prints progress using carriage returns
+        # which causes the terminal to repeatedly overwrite the same lines on
+        # some shells (PowerShell). Suppress stdout/stderr for the duration of
+        # the sampling to keep the terminal clean.
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            samples = sample_fn(
+                model,
+                sample_shape,
+                noise=x_noised,
+                clip_denoised=args.clip_denoised,
+                denoised_fn=partial(denoised_fn_round, args, model_emb),
+                model_kwargs=model_kwargs,
+                top_p=args.top_p,
+                clamp_step=args.clamp_step,
+                clamp_first=True,
+                mask=input_ids_mask,
+                x_start=x_start,
+                gap=step_gap,
+            )
 
-        if num_samples == 1:
-            sample = all_sample_candidates[0]
-        else:
-            # MBR: batch içindeki her pozisyon için candidate'ler arasında
-            # ortalama L2 mesafesi en düşük olanı seç (en merkezi sample)
-            stacked = th.stack(all_sample_candidates, dim=0)  # [N, B, seq, dim]
-            mean_rep = stacked.mean(dim=0, keepdim=True)       # [1, B, seq, dim]
-            dists = ((stacked - mean_rep) ** 2).sum(dim=-1).mean(dim=-1)  # [N, B]
-            best_idx = dists.argmin(dim=0)  # [B]
-            sample = th.stack([all_sample_candidates[best_idx[b]][b] for b in range(bsz)], dim=0)
-
+        sample = samples[-1]
         sample = sample[:, fuse_len:fuse_len + answer_len, :]
+    # sample shape suppressed
         logits = model.get_logits(sample)
         cands = th.topk(logits, k=1, dim=-1)
 
         probs = th.softmax(logits, dim=-1)
+        max_probs = probs.max(dim=-1).values
         chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
         seq_confidence = chosen_probs.mean(dim=1)
         seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
+
+        # Confidence-based token filtering before decoding.
+        conf_threshold = float(getattr(args, 'confidence_threshold', 0.3))
+        pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+        sep_id = tokenizer.sep_token_id
+        token_ids = cands.indices.squeeze(-1).clone()
+        token_ids = token_ids.masked_fill(max_probs < conf_threshold, pad_id)
 
         try:
             sample_flat = sample.contiguous().view(-1, sample.size(-1))
@@ -353,31 +350,17 @@ def main():
         word_lst_ref = []
         word_lst_source = []
 
-        sep_id = tokenizer.tokenizer.sep_token_id if hasattr(tokenizer, 'tokenizer') else tokenizer.sep_token_id
-        pad_id = tokenizer.tokenizer.pad_token_id if hasattr(tokenizer, 'tokenizer') else tokenizer.pad_token_id
-
-        for seq, prob_seq in zip(cands.indices, chosen_probs):
-            seq = seq.to(th.device("cpu"))
-            prob_seq = prob_seq.to(th.device("cpu"))
-
-            # Seçenek 1: [SEP] veya [PAD] tokenına kadar kes
-            token_list = seq.tolist()
-            stop_ids = set(filter(None, [sep_id, pad_id]))
-            cut = next((i for i, t in enumerate(token_list) if t in stop_ids), len(token_list))
-            seq = seq[:cut] if cut > 0 else seq
-
-            # Seçenek 3: SEP/PAD bulunamadıysa trailing confidence < 0.3 tokenları sil
-            conf_threshold = 0.3
-            if cut == len(token_list):
-                prob_list = prob_seq[:len(seq)].tolist()
-                last_confident = len(prob_list)
-                for j in range(len(prob_list) - 1, -1, -1):
-                    if prob_list[j] >= conf_threshold:
-                        last_confident = j + 1
-                        break
-                seq = seq[:last_confident] if last_confident > 0 else seq[:1]
-
-            tokens = tokenizer.decode_token(seq)
+    # debug tensor printing removed to avoid huge outputs that clutter/overwrite
+    # the terminal during long runs.
+        stop_ids = {pad_id}
+        if sep_id is not None:
+            stop_ids.add(sep_id)
+        for seq_ids in token_ids:
+            seq_ids = seq_ids.to(th.device("cpu"))
+            seq_list = seq_ids.tolist()
+            first_stop = next((i for i, t in enumerate(seq_list) if t in stop_ids), len(seq_list))
+            seq_cut = seq_ids[:first_stop]
+            tokens = tokenizer.decode_token(seq_cut)
             word_lst_recover.append(tokens)
 
         for seq, input_mask in zip(input_ids_x, input_ids_mask_ori):
