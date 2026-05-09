@@ -4,6 +4,29 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+## 2026-05-10
+
+### [KARAR] sample_vqa_GPU.py — SEP/PAD kesme + confidence threshold + MBR
+Üretilen sequence post-processing pipeline'ı eklendi:
+- Seçenek 1: İlk [SEP]/[PAD] tokenına kadar kes
+- Seçenek 3: SEP/PAD yoksa trailing confidence < 0.3 tokenları sil
+- Seçenek 4: --num_samples N ile MBR decoding; N=1 mevcut davranışı korur, N>1 kaliteyi artırır (offline eval için N=3-5 önerilir)
+
+Neden: JSONL analizi — doğru cevap %29 örnekte üretilmiş ama 15-20 token gürültü arasına gömülmüş. Exact match 0 iken contains %29.
+
+### [BEKLEYEN KARAR] Seçenek 2 — Training'de padding mask ile loss masking
+Henüz uygulanmadı. Sonraki training run başlamadan önce gaussian_diffusion.py training_losses içinde MSE loss'u gerçek cevap uzunluğuyla maskele:
+
+    ans_len_mask = (token_ids != pad_id).float()
+    terms["mse"] = mean_flat(
+        (ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1)
+    )
+
+Neden uygulanmadı: Mevcut run devam ediyor, yeniden eğitim gerektirir.
+Beklenen etki: Model kısa cevaplar için SEP/PAD üretmeyi öğrenir, post-processing bağımlılığı azalır.
+
+---
+
 ## 2026-05-06
 
 ### [KARAR] `efficient_sample.py` silindi
