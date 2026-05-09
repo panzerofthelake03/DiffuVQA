@@ -45,7 +45,9 @@ def create_argparser():
     return parser
 
 def main():
-    args = create_argparser().parse_args()
+    args, unknown = create_argparser().parse_known_args()
+    if unknown:
+        print(f"[WARNING] Unrecognized arguments (ignored): {unknown}")
     set_seed(args.seed)
     
     # dist_util.setup_dist()
