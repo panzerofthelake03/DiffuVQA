@@ -70,6 +70,12 @@ class feature_fusion(nn.Module):
 
         self.language_encoder = language_encoder
         self.bert = bert
+        # Cache embedding submodules because the parent model deletes
+        # `temp_bert.embeddings` after initialization to save memory.
+        self.position_embeddings = bert.embeddings.position_embeddings
+        self.token_type_embeddings = bert.embeddings.token_type_embeddings
+        self.bert_embedding_layer_norm = bert.embeddings.LayerNorm
+        self.bert_embedding_dropout = bert.embeddings.dropout
         self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
         self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
@@ -136,10 +142,10 @@ class feature_fusion(nn.Module):
         seq_len = q_ids.size(1)
         position_ids = torch.arange(seq_len, dtype=torch.long, device=q_ids.device).unsqueeze(0)
         token_type_ids = torch.zeros_like(q_ids)
-        position_emb = self.bert.embeddings.position_embeddings(position_ids)
-        token_type_emb = self.bert.embeddings.token_type_embeddings(token_type_ids)
-        question_emb = self.bert.embeddings.LayerNorm(token_emb + position_emb + token_type_emb)
-        question_emb = self.bert.embeddings.dropout(question_emb)
+        position_emb = self.position_embeddings(position_ids)
+        token_type_emb = self.token_type_embeddings(token_type_ids)
+        question_emb = self.bert_embedding_layer_norm(token_emb + position_emb + token_type_emb)
+        question_emb = self.bert_embedding_dropout(question_emb)
 
         extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, dtype=question_emb.dtype)
         for layer in self.bert.encoder.layer:
