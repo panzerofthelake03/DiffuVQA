@@ -89,9 +89,6 @@ class TrainLoop:
 
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
         if self.resume_step:
-            frac_done = (self.step + self.resume_step) / self.learning_steps
-            lr = self.lr * (1 - frac_done)
-            self.opt = AdamW(self.master_params, lr=lr, weight_decay=self.weight_decay)
             self._load_optimizer_state()
             self.ema_params = [
                 self._load_ema_parameters(rate) for rate in self.ema_rate
