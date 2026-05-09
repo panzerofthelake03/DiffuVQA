@@ -362,7 +362,19 @@ class TrainLoop:
             return
         import math
         frac_done = (self.step + self.resume_step) / self.learning_steps
-        lr = self.lr * 0.5 * (1 + math.cos(math.pi * frac_done))
+        
+        # Warmup + Cosine with LR floor
+        warmup_frac = 0.03  # ~4500 steps for 150k total
+        lr_min = self.lr * 0.05  # LR floor at 5% of base LR
+        
+        if frac_done < warmup_frac:
+            # Linear warmup phase
+            lr = self.lr * (frac_done / warmup_frac)
+        else:
+            # Cosine decay phase with floor
+            cosine_frac = (frac_done - warmup_frac) / (1 - warmup_frac)
+            lr = lr_min + (self.lr - lr_min) * 0.5 * (1 + math.cos(math.pi * cosine_frac))
+        
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
 
