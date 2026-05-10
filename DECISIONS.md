@@ -7,6 +7,23 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 ## 2026-05-10
 
 ### [BUGFIX] sample_vqa_GPU.py — `decode_token()` tensor type hatasının düzeltilmesi
+### [BUGFIX v2] shared/basic_utils.py — `decode_token()` 0D tensor hatasının köklü çözümü
+**Hata:** `TypeError: object of type 'int' has no len()` satır 87'de (seq.squeeze(-1).tolist())
+- seq_len=1 ise, seq_cut shape [1] → squeeze(-1) → shape [] (0D tensor)
+- 0D tensor.tolist() → integer döner
+- `while len(seq)>0` → INTEGER'a len() uygulanamaz → ERROR
+
+**Root cause:** squeeze(-1) yapıldığında 0D tensor'dan integer çıkabiliyor
+
+**Çözüm:** squeeze(-1) yerine flatten() kullan (her zaman liste döner):
+
+    seq_list = seq.flatten().tolist()
+    while len(seq_list)>0 and seq_list[-1] == self.pad_token_id:
+        seq_list.pop()
+
+**Beklenen etki:** seq_len=1 durumunda da sampling hatasız çalışır.
+
+### [BUGFIX] sample_vqa_GPU.py — `decode_token()` tensor type hatasının düzeltilmesi
 **Hata:** `TypeError: object of type 'int' has no len()` satır 363'te
 - `seq_cut = seq_ids[:first_stop]` PyTorch tensor kalıyordu
 - `tokenizer.decode_token(seq_cut)` fonksiyonu listeyi bekliyor ama tensor alıyordu

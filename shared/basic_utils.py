@@ -78,15 +78,17 @@ class myTokenizer():
         
     def decode_token(self, seq):
         if isinstance(self.tokenizer, dict):
-            seq = seq.squeeze(-1).tolist()
-            while len(seq)>0 and seq[-1] == self.pad_token_id:
-                seq.pop()
-            tokens = " ".join([self.rev_tokenizer[x] for x in seq]).replace('__ ', '').replace('@@ ', '')
+            # Flatten ensures list output even if seq is 0D tensor (scalar)
+            seq_list = seq.flatten().tolist()
+            while len(seq_list)>0 and seq_list[-1] == self.pad_token_id:
+                seq_list.pop()
+            tokens = " ".join([self.rev_tokenizer[x] for x in seq_list]).replace('__ ', '').replace('@@ ', '')
         elif isinstance(self.tokenizer, PreTrainedTokenizerFast):
-            seq = seq.squeeze(-1).tolist()
-            while len(seq)>0 and seq[-1] == self.pad_token_id:
-                seq.pop()
-            tokens = self.tokenizer.decode(seq, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+            # Flatten ensures list output even if seq is 0D tensor (scalar)
+            seq_list = seq.flatten().tolist()
+            while len(seq_list)>0 and seq_list[-1] == self.pad_token_id:
+                seq_list.pop()
+            tokens = self.tokenizer.decode(seq_list, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         else:
             assert False, "invalid type of vocab_dict"
         return tokens
