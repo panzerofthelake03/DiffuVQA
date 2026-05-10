@@ -359,14 +359,14 @@ def main():
             seq_ids = seq_ids.to(th.device("cpu"))
             seq_list = seq_ids.tolist()
             first_stop = next((i for i, t in enumerate(seq_list) if t in stop_ids), len(seq_list))
-            seq_cut = seq_ids[:first_stop].tolist()
+            seq_cut = seq_ids[:first_stop]
             tokens = tokenizer.decode_token(seq_cut)
             word_lst_recover.append(tokens)
 
         for seq, input_mask in zip(input_ids_x, input_ids_mask_ori):
             seq = seq.to(th.device("cpu"))
-            word_lst_source.append(tokenizer.decode_token(seq[:args.seq_len].tolist()))
-            word_lst_ref.append(tokenizer.decode_token(seq[args.seq_len:].tolist()))
+            word_lst_source.append(tokenizer.decode_token(seq[:args.seq_len]))
+            word_lst_ref.append(tokenizer.decode_token(seq[args.seq_len:]))
 
         with open(out_path, 'a', encoding='utf-8') as fout:
             for i, (recov, ref, src, image_name_i) in enumerate(zip(word_lst_recover, word_lst_ref, word_lst_source, image_name)):
