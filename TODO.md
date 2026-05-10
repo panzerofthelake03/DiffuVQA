@@ -57,3 +57,6 @@
 - [x] `sample_vqa_GPU.py` — Confidence threshold 0.3 → 0.1 düşürüldü (95k PubMedBERT analizinde %59 boş cevap tespit edildi)
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — `copytree` veri kaybı düzeltildi: `datasets/`, `checkpoints/` Drive'a kopyalanmıyor artık
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Clone hücresine `os.chdir("/content")` eklendi (getcwd crash düzeltildi)
+- [x] `eval/eval_DiffuVQA.py` — BERTScore `int too big to convert` hatası düzeltildi: kandidat/referans stringler 512 karaktere truncate edildi
+- [x] `eval/eval_DiffuVQA.py` — BERTScore tqdm duplicate satır sorunu düzeltildi: `verbose=False` + `logging.disable` + `warnings.catch_warnings` eklendi
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — `RESUME_CHECKPOINT` 50k olarak güncellendi (`ema_0.9999_050000.pt`)

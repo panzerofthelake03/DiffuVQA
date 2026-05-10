@@ -54,6 +54,24 @@ terms["mse"] = mean_flat((ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1
 
 ---
 
+## 2026-05-11
+
+### [KARAR] `eval/eval_DiffuVQA.py` — BERTScore `int too big to convert` hatası düzeltildi
+**Değişiklik:** `bert_score()` çağrısından önce tüm kandidat ve referans stringler 512 karaktere truncate ediliyor (`r[:512]`). `verbose=False` ayarlandı; çağrı `warnings.catch_warnings()` + `logging.disable(WARNING)` bloğuna alındı.
+
+**Neden:** 50k Bert analizinde model ~34 kelimelik stringler üretiyordu. `microsoft/deberta-xlarge-mnli` tokenizer bu uzunlukta stringleri int32 aralığını aşan token ID'lere dönüştürüyor. 512 karakter BERT token limitinin (~512 token) güvenli altında, kısa tıbbi cevaplarda anlam kaybı yok.
+
+**Ayrıca:** `verbose=True` → `verbose=False` ile transformers weight loading sırasında her adımı iki kez basan tqdm duplicate satır sorunu giderildi. Logging suppress ile LOAD REPORT gürültüsü de susturuldu.
+
+---
+
+### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — `RESUME_CHECKPOINT` 50k güncellendi
+**Değişiklik:** `ema_0.9999_045000.pt` → `ema_0.9999_050000.pt`
+
+**Neden:** 50k checkpoint ile devam ediliyor.
+
+---
+
 ## 2026-05-09
 
 ### [KARAR] `train_util.py` — Resume init'teki hatalı LR hesabı kaldırıldı
