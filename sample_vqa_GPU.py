@@ -360,7 +360,7 @@ def main():
         sep_id = tokenizer.tokenizer.sep_token_id if hasattr(tokenizer, 'tokenizer') else tokenizer.sep_token_id
         pad_id = tokenizer.tokenizer.pad_token_id if hasattr(tokenizer, 'tokenizer') else tokenizer.pad_token_id
 
-        for seq, prob_seq in zip(cands.indices, chosen_probs):
+        for seq, prob_seq in zip(cands.indices.squeeze(-1), chosen_probs):
             seq = seq.to(th.device("cpu"))
             prob_seq = prob_seq.to(th.device("cpu"))
 
