@@ -146,7 +146,27 @@ def main():
 
     logger.log("### Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args=args)
-    state_dict = torch.load(args.model_path, map_location="cuda")
+    if not args.model_path or not os.path.exists(args.model_path):
+        raise FileNotFoundError(f"Checkpoint not found: {args.model_path}")
+    if os.path.getsize(args.model_path) == 0:
+        raise RuntimeError(
+            f"Checkpoint file is empty: {args.model_path}. "
+            "This usually indicates an interrupted save/copy."
+        )
+
+    map_location = "cuda" if th.cuda.is_available() else "cpu"
+    try:
+        state_dict = torch.load(args.model_path, map_location=map_location)
+    except EOFError as exc:
+        raise RuntimeError(
+            f"Checkpoint appears truncated/corrupt (EOFError): {args.model_path}. "
+            "Please select another checkpoint or regenerate this one."
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load checkpoint: {args.model_path}. "
+            "The file may be corrupt or incompatible."
+        ) from exc
     new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
     model.load_state_dict(new_state_dict)
 
