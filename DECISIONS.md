@@ -6,6 +6,23 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ## 2026-05-10
 
+### [BUGFIX] sample_vqa_GPU.py — `decode_token()` tensor type hatasının düzeltilmesi
+**Hata:** `TypeError: object of type 'int' has no len()` satır 363'te
+- `seq_cut = seq_ids[:first_stop]` PyTorch tensor kalıyordu
+- `tokenizer.decode_token(seq_cut)` fonksiyonu listeyi bekliyor ama tensor alıyordu
+- `decode_token()` içinde `while len(seq)>0` çağrısı tensor'a uygulanıyordu
+
+**Çözüm:** Üç yerde `.tolist()` eklendi:
+1. Satır ~363: `seq_cut = seq_ids[:first_stop].tolist()`
+2. Satır ~369: `tokenizer.decode_token(seq[:args.seq_len].tolist())`
+3. Satır ~370: `tokenizer.decode_token(seq[args.seq_len:].tolist())`
+
+**Beklenen etki:** Sampling hataları çözülür, JSONL output düzgün oluşturulur.
+
+---
+
+## 2026-05-10 (Önceki)
+
 ### [KARAR] sample_vqa_GPU.py — SEP/PAD kesme + confidence threshold + MBR
 Üretilen sequence post-processing pipeline'ı eklendi:
 - Seçenek 1: İlk [SEP]/[PAD] tokenına kadar kes
