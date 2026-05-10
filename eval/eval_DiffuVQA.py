@@ -296,7 +296,19 @@ if __name__ == '__main__':
             bert_f1_score = 0.0
             if HAS_BERT_SCORE:
                 try:
-                    P, R, F1 = score(recovers, references, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=True)
+                    import warnings, logging as _logging
+                    # Truncate to 512 chars to avoid deberta token ID integer overflow
+                    _MAX_CHARS = 512
+                    _recovers_trunc = [r[:_MAX_CHARS] for r in recovers]
+                    _references_trunc = [r[:_MAX_CHARS] for r in references]
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        _prev_level = _logging.root.level
+                        _logging.disable(_logging.WARNING)
+                        try:
+                            P, R, F1 = score(_recovers_trunc, _references_trunc, model_type='microsoft/deberta-xlarge-mnli', lang='en', verbose=False)
+                        finally:
+                            _logging.disable(_prev_level)
                     bert_f1_score = torch.mean(F1).item()
                 except Exception as e:
                     print(f"Warning: BERT Score calculation failed: {e}")
