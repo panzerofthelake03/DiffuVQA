@@ -6,6 +6,24 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ## 2026-05-10
 
+### [KARAR] `sample_vqa_GPU.py` — Confidence threshold 0.3 → 0.1 düşürüldü
+**Değişiklik:** `conf_threshold = 0.3` → `conf_threshold = 0.1`
+
+**Neden:** PubMedBERT 95k checkpoint analizi (500 sample step, 1024 örnek): cevapların %59'u tamamen boştu. `0.3` eşiği trailing noise'u temizlemek yerine neredeyse tüm token'ları kesiyordu. `0.1`'de anlamlı token'lar korunurken aşırı gürültü hâlâ filtrelenir.
+
+**Bulgular (95k):** BLEU-1=0.017, exact match=%0.98, entity_overlap=0.885, clinical_similarity=0.693 — model medikal terimleri öğrenmiş ama henüz doğru bağlamı oturtamamış. 150k'da anlamlı iyileşme bekleniyor.
+
+---
+
+### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — `copytree` veri kaybı düzeltildi
+**Değişiklik:** Clone hücresindeki `shutil.copytree(LOCAL_CLONE_PATH, DRIVE_PROJECT_PATH, dirs_exist_ok=True)` kaldırıldı. Yerine yalnızca kod dosyalarını kopyalayan SKIP_DIRS mekanizması eklendi: `datasets`, `checkpoints`, `samples`, `outputs`, `reports`, `.git` klasörleri atlanıyor.
+
+**Neden:** Git clone `datasets/` ve `checkpoints/` getirmiyor (`.gitignore`'da). `copytree` bu klasörleri Drive'da boş olarak yaratıyor, mevcut içeriği (checkpoint .pt dosyaları, SLAKE images) siliyordu.
+
+**Ayrıca:** Hücrenin başına `os.chdir("/content")` eklendi — cwd Drive içindeyken `rmtree(LOCAL_CLONE_PATH)` yapılınca `getcwd` crash veriyordu.
+
+---
+
 ### [KARAR] `sample_vqa_GPU.py` — SEP/PAD kesme + confidence threshold + MBR eklendi
 **Değişiklik:** Üretilen sequence post-processing pipeline'ı eklendi:
 

@@ -2,7 +2,7 @@
 
 ## Aktif Görevler
 
-- [ ] Bert 150k eğitimi tamamlanınca sampling yap ve sonuçları değerlendir (30k'da ara test önerilir)
+- [ ] Bert 150k eğitimi tamamlanınca sampling yap ve sonuçları değerlendir
 - [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
 - [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (150k sonrası)
 - [ ] Sonraki training run için Seçenek 2 uygula — `gaussian_diffusion.py` training_losses'da padding mask ile loss masking
@@ -54,3 +54,6 @@
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — 150k full training config güncellendi (LR=0.000283, batch=64, diffusion=2000, seq_len=64)
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Resume checkpoint yapısı PubMedBERT ile birebir hizalandı
 - [x] `sample_vqa_GPU.py` — Post-processing pipeline eklendi: SEP/PAD kesme (Seçenek 1) + confidence threshold (Seçenek 3) + MBR `--num_samples` (Seçenek 4)
+- [x] `sample_vqa_GPU.py` — Confidence threshold 0.3 → 0.1 düşürüldü (95k PubMedBERT analizinde %59 boş cevap tespit edildi)
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — `copytree` veri kaybı düzeltildi: `datasets/`, `checkpoints/` Drive'a kopyalanmıyor artık
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — Clone hücresine `os.chdir("/content")` eklendi (getcwd crash düzeltildi)
