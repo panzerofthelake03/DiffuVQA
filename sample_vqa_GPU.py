@@ -371,7 +371,7 @@ def main():
             seq = seq[:cut] if cut > 0 else seq
 
             # Seçenek 3: confidence < threshold olan tokenları kes (trailing noise)
-            conf_threshold = 0.3
+            conf_threshold = 0.1
             if cut == len(token_list):
                 # SEP/PAD bulunamadıysa trailing low-confidence tokenları sil
                 prob_list = prob_seq[:len(seq)].tolist()
