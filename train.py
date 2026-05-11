@@ -54,6 +54,7 @@ def main():
     logger.log("### Creating data loader...")
     start_t = time.time()
     tokenizer = load_tokenizer(args)
+    args.pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
     model_weight, tokenizer = load_model_emb(args, tokenizer)
     transform = transforms.Compose([
         transforms.Resize((args.image_resolution, args.image_resolution)),

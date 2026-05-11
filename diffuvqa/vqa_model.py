@@ -268,10 +268,9 @@ class TransformerNetModel(nn.Module):
         self.hidden_size = config.hidden_size
 
         self.word_embedding = nn.Embedding(vocab_size, self.input_dims)
-        # lm_head is an independent projection — not tied to word_embedding.
-        # Tying forces word_embedding and lm_head to optimize against each other
-        # (diffusion pushes embeddings while NLL pulls them back toward vocab),
-        # which prevents the model from learning a stable answer manifold.
+        # lm_head is initialized as an output projection and later re-tied to
+        # word_embedding when shapes match to keep token logits aligned with
+        # the embedding manifold used by diffusion training.
         self.lm_head = nn.Linear(self.input_dims, vocab_size, bias=False)
         nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.02)
 

@@ -639,10 +639,14 @@ class GaussianDiffusion:
         ddpm_input_pre, ans_emb_pre = real_model.get_ddpm_input(image, model_kwargs)
 
         ans_emb = real_model.get_embeds(input_ids_a)
-        ans_len_mask = (input_ids_a != 0).float()
+        _model_args = getattr(real_model, 'args', None)
+        pad_id = getattr(_model_args, 'pad_token_id', 0)
+        if pad_id is None:
+            pad_id = 0
+        ans_len_mask = (input_ids_a != int(pad_id)).float()
 
-        use_noising_f = bool(getattr(getattr(real_model, 'args', None), 'use_noising_f', False))
-        pre_answer_loss_weight = float(getattr(getattr(real_model, 'args', None), 'pre_answer_loss_weight', 0.0))
+        use_noising_f = bool(getattr(_model_args, 'use_noising_f', False))
+        pre_answer_loss_weight = float(getattr(_model_args, 'pre_answer_loss_weight', 0.0))
 
         # x_start_mean = clean answer embedding — defines the target manifold for
         # diffusion. x_start is a noisy sample around this mean (reparametrization).
