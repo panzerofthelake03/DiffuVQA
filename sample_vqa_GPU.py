@@ -365,7 +365,7 @@ def main():
             #TODO: consider more sophisticated confidence metrics that account for sequence length and token-level variance, rather than just mean token prob.
             #TODO: consider LLM based relevance checking as an additional confidence/rationale metric.
             # Mask low-confidence positions to PAD before decoding.
-            conf_threshold = float(getattr(args, 'confidence_threshold', 0.3))
+            conf_threshold = float(getattr(args, 'confidence_threshold', 0.1))
             pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
             sep_id = tokenizer.sep_token_id
             token_ids = cands.indices.squeeze(-1).clone()
