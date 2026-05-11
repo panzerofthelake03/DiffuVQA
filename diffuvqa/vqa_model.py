@@ -267,9 +267,12 @@ class TransformerNetModel(nn.Module):
         self.hidden_size = config.hidden_size
 
         self.word_embedding = nn.Embedding(vocab_size, self.input_dims)
-        self.lm_head = nn.Linear(self.input_dims, vocab_size, bias=False)
-        with th.no_grad():
-            self.lm_head.weight = self.word_embedding.weight
+        # lm_head input must match forward() output size (output_dims), not input_dims.
+        # Tying is only valid when they are equal; otherwise use an independent head.
+        self.lm_head = nn.Linear(output_dims, vocab_size, bias=False)
+        if output_dims == self.input_dims:
+            with th.no_grad():
+                self.lm_head.weight = self.word_embedding.weight
 
         time_embed_dim = hidden_t_dim * 4
         self.time_embed = nn.Sequential(
