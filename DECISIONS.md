@@ -259,6 +259,55 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 
 ---
 
+### [BUGFIX] `step_sample.py` + `shared/train_util.py` — 500. adım civarı `lossaware` sampler NaN çökmesi
+
+**Hata:** Eğitim sırasında loss önce `nan` oluyor, ardından `LossSecondMomentResampler` bu non-finite loss değerlerini history içine yazıyor. Sonraki sampler çağrısında olasılık vektörü `NaN` içerdiği için
+
+```python
+np.random.choice(len(p), size=(batch_size,), p=p)
+```
+
+satırı `ValueError: probabilities contain NaN` ile çöküyor.
+
+**Kök neden:** Asıl matematiksel NaN tek bir microbatch'te başlıyor; fakat eğitim o anda durmak yerine bu NaN değeri timestep sampler state'ine de yayıyor. Böylece tek bir bozuk batch tüm eğitim akışını kırıyor.
+
+**Uygulanan değişiklikler:**
+
+1. `diffuvqa/step_sample.py` içinde sampler ağırlıkları sanitize edildi:
+    - non-finite veya `<= 0` ağırlıklar temizleniyor,
+    - gerekirse uniform ağırlıklara fallback yapılıyor.
+
+2. `LossSecondMomentResampler.update_with_all_losses()` içinde non-finite loss değerleri history'ye yazılmıyor:
+    ```python
+    if not np.isfinite(loss):
+         continue
+    ```
+
+3. `shared/train_util.py` içinde non-finite per-sample loss'lar backward ve sampler update öncesi filtreleniyor.
+
+4. Tüm microbatch non-finite ise o microbatch tamamen skip ediliyor ve log düşülüyor.
+
+5. `optimize_normal()` içinde non-finite gradient tespit edilirse optimizer step atlanıyor:
+    ```python
+    Found non-finite gradients ...; skipping optimizer step.
+    ```
+
+**Neden bu çözüm seçildi:**
+- İlk hedef, eğitim akışının tek bir NaN yüzünden sampler state bozulup tamamen çökmesini engellemekti.
+- Bu fix kök matematiksel NaN'ı garanti olarak çözmez, ama hatayı lokalize eder ve run'ın devam etmesine izin verir.
+- `lossaware` sampler state'i artık bozuk loss'larla kirlenmiyor.
+
+**Beklenen etki:**
+- `ValueError: probabilities contain NaN` hatası tekrar etmemeli.
+- Nadiren gelen bozuk microbatch'ler tüm run'ı düşürmeden atlatılmalı.
+- Eğer non-finite loss sık tekrar ederse, sonraki adım loss bileşenlerinden hangisinin ilk bozulduğunu ayrıştırmak olmalı.
+
+**Operasyonel not:**
+- Hızlı emniyet seçeneği olarak `schedule_sampler=uniform` kullanılabilir.
+- Bu karar bir stabilite kalkanıdır; kök NaN nedeni ayrıca incelenmelidir.
+
+---
+
 ### [KARAR] Notebook — `compare_image_black_vectors` hücresi devre dışı bırakıldı
 **Değişiklik:** Hücre içeriği `scripts.compare_image_black_vectors` modülünü çağırmak yerine bilgilendirici bir mesaj yazdırıyor.
 

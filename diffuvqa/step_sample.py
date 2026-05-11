@@ -42,8 +42,19 @@ class ScheduleSampler(ABC):
                  - timesteps: a tensor of timestep indices.
                  - weights: a tensor of weights to scale the resulting losses.
         """
-        w = self.weights()
-        p = w / np.sum(w)
+        w = np.asarray(self.weights(), dtype=np.float64)
+        finite_positive = np.isfinite(w) & (w > 0)
+        if not finite_positive.any():
+            w = np.ones_like(w, dtype=np.float64)
+        elif not finite_positive.all():
+            w = np.where(finite_positive, w, 0.0)
+
+        total = np.sum(w)
+        if (not np.isfinite(total)) or total <= 0:
+            w = np.ones_like(w, dtype=np.float64)
+            total = np.sum(w)
+
+        p = w / total
         indices_np = np.random.choice(len(p), size=(batch_size,), p=p)
         indices = th.from_numpy(indices_np).long().to(device)
         weights_np = 1 / (len(p) * p[indices_np])
@@ -140,6 +151,10 @@ class LossSecondMomentResampler(LossAwareSampler):
         if not self._warmed_up():
             return np.ones([self.diffusion.num_timesteps], dtype=np.float64)
         weights = np.sqrt(np.mean(self._loss_history ** 2, axis=-1))
+        finite_positive = np.isfinite(weights) & (weights > 0)
+        if not finite_positive.any():
+            return np.ones([self.diffusion.num_timesteps], dtype=np.float64)
+        weights = np.where(finite_positive, weights, 0.0)
         weights /= np.sum(weights)
         weights *= 1 - self.uniform_prob
         weights += self.uniform_prob / len(weights)
@@ -147,6 +162,8 @@ class LossSecondMomentResampler(LossAwareSampler):
 
     def update_with_all_losses(self, ts, losses):
         for t, loss in zip(ts, losses):
+            if not np.isfinite(loss):
+                continue
             if self._loss_counts[t] == self.history_per_term:
                 # Shift out the oldest loss term.
                 self._loss_history[t, :-1] = self._loss_history[t, 1:]

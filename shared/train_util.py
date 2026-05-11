@@ -285,6 +285,27 @@ class TrainLoop:
             )
             losses = compute_losses()
 
+            finite_mask = th.isfinite(losses["loss"])
+            if not finite_mask.all():
+                invalid_count = int((~finite_mask).sum().item())
+                logger.log(
+                    f"Skipping {invalid_count} non-finite loss entries at step {self.step + self.resume_step}."
+                )
+
+            if not finite_mask.any():
+                continue
+
+            if not finite_mask.all():
+                t = t[finite_mask]
+                weights = weights[finite_mask]
+                filtered_losses = {}
+                for key, value in losses.items():
+                    if isinstance(value, th.Tensor) and value.shape[:1] == finite_mask.shape[:1]:
+                        filtered_losses[key] = value[finite_mask]
+                    else:
+                        filtered_losses[key] = value
+                losses = filtered_losses
+
             if isinstance(self.schedule_sampler, LossAwareSampler):
                 self.schedule_sampler.update_with_local_losses(
                     t, losses["loss"].detach()
@@ -336,6 +357,16 @@ class TrainLoop:
             )
 
     def optimize_normal(self):
+        if any(
+            p.grad is not None and not th.isfinite(p.grad).all()
+            for p in self.model.parameters()
+        ):
+            logger.log(
+                f"Found non-finite gradients at step {self.step + self.resume_step}; skipping optimizer step."
+            )
+            zero_grad(self.model_params)
+            return
+
         if self.gradient_clipping > 0:
             self.grad_clip()
         self._log_grad_norm()
