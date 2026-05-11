@@ -332,7 +332,7 @@ def main():
         seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
 
         # Confidence-based token filtering before decoding.
-        conf_threshold = float(getattr(args, 'confidence_threshold', 0.3))
+        conf_threshold = float(getattr(args, 'confidence_threshold', 0.1))
         pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         sep_id = tokenizer.sep_token_id
         token_ids = cands.indices.squeeze(-1).clone()
