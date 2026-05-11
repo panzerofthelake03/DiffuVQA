@@ -255,6 +255,19 @@ nll = th.where(mask.sum(dim=-1) == 0,               # tamamen PAD satır → los
     - exact match
     - contains-match
 
+**Durum güncellemesi (2026-05-11):**
+- Bu kararın kod implementasyonu `sample_vqa_GPU.py` içine işlendi.
+- `create_argparser()` decode varsayılanlarına şu alanlar eklendi:
+    - `decode_top_k=5`
+    - `min_answer_tokens=2`
+    - `short_answer_penalty=1.0`
+- Decode akışı `topk(logits, k=1)` yerine `topk(logits, k=decode_top_k)` kullanacak şekilde güncellendi.
+- Her örnek için `k` aday oluşturulup token-logprob tabanlı skor ve kısa cevap cezası ile en iyi aday seçiliyor.
+- `min_answer_tokens` öncesi SEP/PAD bastırma eklendi.
+- Confidence filtresi `min_answer_tokens` sonrasına taşındı.
+
+**Not:** Bu değişiklik inference-only'dir; yeniden eğitim gerektirmez. Ancak en iyi parametre kombinasyonu checkpoint kalitesine göre değişebileceği için kısa bir sweep önerilir.
+
 ---
 
 ## 2026-05-10

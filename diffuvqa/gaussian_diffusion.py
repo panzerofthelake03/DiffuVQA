@@ -248,7 +248,9 @@ class GaussianDiffusion:
         :param mask: anchoring masked position
         :return: A noisy version of x_start.
         """
-        if noise is not None and add_information is not None:
+        if noise is not None and bool(add_information):
+            if f is None:
+                raise ValueError("q_sample received add_information=True but f is None")
 
             noise = (
                     _extract_into_tensor(self.sqrt_alphas_cumprod, t, f.shape) * f

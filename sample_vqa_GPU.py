@@ -61,7 +61,16 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 
 def create_argparser():
     defaults = dict(model_path='', step=2500, out_dir='', top_p=0)
-    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False, confidence_threshold=0.3)
+    decode_defaults = dict(
+        split='test',
+        clamp_step=0,
+        seed2=105,
+        clip_denoised=False,
+        confidence_threshold=0.3,
+        decode_top_k=5,
+        min_answer_tokens=2,
+        short_answer_penalty=1.0,
+    )
     defaults.update(load_defaults_config())
     defaults.update(decode_defaults)
     parser = argparse.ArgumentParser()
@@ -344,21 +353,89 @@ def main():
             sample = sample[:, answer_start:answer_end, :]
             # sample shape suppressed
             logits = model.get_logits(sample)
-            cands = th.topk(logits, k=1, dim=-1)
-
             probs = th.softmax(logits, dim=-1)
+            decode_top_k = max(1, int(getattr(args, 'decode_top_k', 1)))
+            decode_top_k = min(decode_top_k, probs.size(-1))
+            cands = th.topk(logits, k=decode_top_k, dim=-1)
+
             max_probs = probs.max(dim=-1).values
-            chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
-            seq_confidence = chosen_probs.mean(dim=1)
-            seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
             #TODO: consider more sophisticated confidence metrics that account for sequence length and token-level variance, rather than just mean token prob.
             #TODO: consider LLM based relevance checking as an additional confidence/rationale metric.
             # Mask low-confidence positions to PAD before decoding.
             conf_threshold = float(getattr(args, 'confidence_threshold', 0.1))
+            min_answer_tokens = max(0, int(getattr(args, 'min_answer_tokens', 0)))
+            short_answer_penalty = float(getattr(args, 'short_answer_penalty', 1.0))
             pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
             sep_id = tokenizer.sep_token_id
-            token_ids = cands.indices.squeeze(-1).clone()
-            token_ids = token_ids.masked_fill(max_probs < conf_threshold, pad_id)
+
+            topk_indices = cands.indices  # [B, T, K]
+            topk_probs = probs.gather(-1, topk_indices)  # [B, T, K]
+
+            bsz, tgt_len, k_size = topk_indices.shape
+            best_token_ids = th.full((bsz, tgt_len), pad_id, dtype=topk_indices.dtype, device=topk_indices.device)
+            best_seq_confidence = th.zeros((bsz,), dtype=probs.dtype, device=probs.device)
+            best_seq_logprob = th.full((bsz,), -1e9, dtype=probs.dtype, device=probs.device)
+
+            for b in range(bsz):
+                best_score = None
+                best_conf = None
+                best_lp = None
+                best_ids = None
+
+                for k_idx in range(k_size):
+                    cand_ids = topk_indices[b, :, k_idx].clone()
+                    cand_probs = topk_probs[b, :, k_idx].clone()
+
+                    # Prevent early empty answers by suppressing stop tokens
+                    # before reaching the minimum answer length.
+                    if min_answer_tokens > 0:
+                        early_len = min(min_answer_tokens, cand_ids.size(0))
+                        early_pad_mask = (cand_ids[:early_len] == pad_id)
+                        if early_pad_mask.any():
+                            cand_ids[:early_len] = cand_ids[:early_len].masked_fill(early_pad_mask, 0)
+                        if sep_id is not None:
+                            early_sep_mask = (cand_ids[:early_len] == sep_id)
+                            if early_sep_mask.any():
+                                cand_ids[:early_len] = cand_ids[:early_len].masked_fill(early_sep_mask, 0)
+
+                    # Apply confidence mask only after min_answer_tokens.
+                    conf_ids = cand_ids.clone()
+                    conf_probs = cand_probs.clone()
+                    conf_start = min(min_answer_tokens, conf_ids.size(0))
+                    if conf_start < conf_ids.size(0):
+                        low_conf_mask = conf_probs[conf_start:] < conf_threshold
+                        conf_ids[conf_start:] = conf_ids[conf_start:].masked_fill(low_conf_mask, pad_id)
+
+                    seq_conf = conf_probs.mean()
+                    seq_lp = th.log(conf_probs.clamp(min=1e-12)).sum()
+
+                    seq_list = conf_ids.tolist()
+                    effective_len = 0
+                    for tok in seq_list:
+                        if tok == pad_id or (sep_id is not None and tok == sep_id):
+                            break
+                        effective_len += 1
+
+                    penalty = 0.0
+                    if effective_len < min_answer_tokens:
+                        penalty = short_answer_penalty * float(min_answer_tokens - effective_len)
+
+                    score = float(seq_lp.item()) - penalty
+
+                    if best_score is None or score > best_score:
+                        best_score = score
+                        best_conf = seq_conf
+                        best_lp = seq_lp
+                        best_ids = conf_ids
+
+                if best_ids is not None:
+                    best_token_ids[b] = best_ids
+                    best_seq_confidence[b] = best_conf
+                    best_seq_logprob[b] = best_lp
+
+            token_ids = best_token_ids
+            seq_confidence = best_seq_confidence
+            seq_logprob = best_seq_logprob
 
             try:
                 sample_flat = sample.contiguous().view(-1, sample.size(-1))
