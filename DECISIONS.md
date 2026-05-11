@@ -519,6 +519,44 @@ Vision encoder init sırasında dummy forward pass ile gerçek kanal boyutu öl�
 
 ---
 
+### [KARAR] `diffuvqa/vqa_model.py` — `lm_head` boyut uyumu ve retrain gereksinimi
+
+**Sorun:** Tarihsel olarak `input_dims/output_dims` uyumsuz kombinasyonları (örn. 128/512) latent risk oluşturuyordu. `get_logits()` tarafında logits başlığı ile hidden temsil boyutu farklı kalırsa training/sampling sırasında matris çarpımı patlayabiliyordu.
+
+**Uygulanan değişiklikler (`diffuvqa/vqa_model.py`):**
+
+1. `lm_head` artık `output_dims` ile tanımlandı:
+    ```python
+    self.lm_head = nn.Linear(self.output_dims, vocab_size, bias=False)
+    ```
+
+2. Erken doğrulama eklendi (`fail-fast`):
+    ```python
+    if self.input_dims != self.output_dims:
+         raise ValueError(...)
+    ```
+
+3. Weight tying koşulu sıkılaştırıldı:
+    ```python
+    if self.output_dims == self.input_dims and self.lm_head.weight.shape == self.word_embedding.weight.shape:
+         self.lm_head.weight = self.word_embedding.weight
+    ```
+
+**Notebook parametreleri için karar:**
+- Mevcut Colab akışında model `shared/basic_utils.py` içinde `input_dims=args.hidden_dim` ve `output_dims=args.hidden_dim` ile oluşturulduğu için bu değişiklikten sonra **retrain zorunlu değil**.
+- Yani notebooktaki güncel eğitim/örnekleme parametreleriyle, checkpoint yükleme hatası yoksa mevcut checkpoint ailesi kullanılabilir.
+
+**Ne zaman retrain gerekir:**
+- Eski bir checkpoint gerçekten `input_dims != output_dims` mimarisiyle üretilmişse,
+- veya yeni deneyde boyutları bilinçli olarak ayrıştırmak istenirse (yeni koruma buna izin vermez),
+- ya da checkpoint yükleme sırasında shape mismatch alınırsa.
+
+**Beklenen etki:**
+- Latent boyut uyumsuzluğu erken aşamada görünür hata verir; sessiz NaN/crash riski azalır.
+- Varsayılan notebook akışı (eşit boyut) geriye uyumlu kalır.
+
+---
+
 ### [KARAR] Notebook — `compare_image_black_vectors` hücresi devre dışı bırakıldı
 **Değişiklik:** Hücre içeriği `scripts.compare_image_black_vectors` modülünü çağırmak yerine bilgilendirici bir mesaj yazdırıyor.
 
