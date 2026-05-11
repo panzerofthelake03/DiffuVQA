@@ -260,8 +260,14 @@ class TransformerNetModel(nn.Module):
         self.logits_mode = logits_mode
         self.hidden_size = config.hidden_size
 
+        if self.input_dims != self.output_dims:
+            raise ValueError(
+                "Unsupported configuration: input_dims and output_dims must match "
+                f"(got input_dims={self.input_dims}, output_dims={self.output_dims})."
+            )
+
         self.word_embedding = nn.Embedding(vocab_size, self.input_dims)
-        self.lm_head = nn.Linear(self.input_dims, vocab_size, bias=False)
+        self.lm_head = nn.Linear(self.output_dims, vocab_size, bias=False)
         nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.02)
 
         time_embed_dim = hidden_t_dim * 4
@@ -368,7 +374,7 @@ class TransformerNetModel(nn.Module):
         # Re-enable embedding/logit weight tying when dimensions match.
         # This keeps token embedding and vocabulary projection in the same manifold.
         try:
-            if self.lm_head.weight.shape == self.word_embedding.weight.shape:
+            if self.output_dims == self.input_dims and self.lm_head.weight.shape == self.word_embedding.weight.shape:
                 self.lm_head.weight = self.word_embedding.weight
         except Exception:
             pass
