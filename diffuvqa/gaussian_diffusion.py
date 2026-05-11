@@ -642,9 +642,10 @@ class GaussianDiffusion:
         ddpm_input_pre, ans_emb_pre = real_model.get_ddpm_input(image, model_kwargs)
 
         ans_emb = real_model.get_embeds(input_ids_a)
-        # x_start_mean = torch.cat([ddpm_input_pre, ans_emb], dim=1)
         x_start_mean = ans_emb
         cond_x_start_mean = torch.cat([ddpm_input_pre, x_start_mean], dim=1)
+        use_noising_f = bool(getattr(getattr(real_model, 'args', None), 'use_noising_f', False))
+        pre_answer_loss_weight = float(getattr(getattr(real_model, 'args', None), 'pre_answer_loss_weight', 0.0))
 
         std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod,
                                    th.tensor([0]).to(x_start_mean.device),
@@ -678,16 +679,12 @@ class GaussianDiffusion:
         if noise is None:
             noise = th.randn_like(cond_x_start)
 
-        # Use the full conditional start (ddpm_input_pre + x_start) as the
-        # auxiliary information tensor `f` so its shape matches `cond_x_start`.
-        # Previously this duplicated ddpm_input_pre which could produce a
-        # different sequence length and cause shape mismatches during
-        # diffusion sampling.
-        f = cond_x_start
+        # Keep training aligned with default sampling: by default the answer
+        # region starts from pure Gaussian noise and does not get an extra
+        # shortcut through the auxiliary noising branch.
+        f = cond_x_start if use_noising_f else None
 
-        # Sanity check shapes: q_sample expects x_start and f to have identical
-        # shapes. If they differ, print detailed diagnostics and raise.
-        if cond_x_start.shape != f.shape:
+        if f is not None and cond_x_start.shape != f.shape:
             logger.log(f"SHAPE MISMATCH before q_sample: cond_x_start={tuple(cond_x_start.shape)}, f={tuple(f.shape)}, ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start={tuple(x_start.shape)}, x_start_mean={tuple(x_start_mean.shape)}")
             raise RuntimeError("cond_x_start and f have different shapes before q_sample")
 
@@ -706,8 +703,14 @@ class GaussianDiffusion:
             ),
         ], dim=1)
 
-        x_t = self.q_sample(cond_x_start, f, t, noise=noise, mask=mask_to_use,
-                            add_information=True)  # reparametrization trick.
+        x_t = self.q_sample(
+            cond_x_start,
+            f,
+            t,
+            noise=noise,
+            mask=mask_to_use,
+            add_information=use_noising_f,
+        )  # reparametrization trick.
 
         get_logits = real_model.get_logits
 
@@ -730,11 +733,17 @@ class GaussianDiffusion:
         # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
         # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
-        # pre_answer_loss is disabled: the CVAE fusion output (ans_emb_pre)
-        # lives in a different semantic space than the word embedding (ans_emb).
-        # MSE between these two would pull the vision-language fusion toward the
-        # raw token-embedding manifold, which degrades representation quality.
-        pre_answer_loss = th.tensor(0.0, device=ans_emb.device)
+        if pre_answer_loss_weight > 0:
+            pre_answer_len = min(ans_emb_pre.size(1), x_start_mean.size(1))
+            aligned_ans_emb_pre = ans_emb_pre[:, :pre_answer_len, :]
+            aligned_ans_emb = x_start_mean[:, :pre_answer_len, :]
+            aligned_ans_mask = ans_len_mask[:, :pre_answer_len]
+            pre_answer_per_token = ((aligned_ans_emb_pre - aligned_ans_emb) ** 2).mean(dim=-1)
+            pre_answer_den = aligned_ans_mask.sum(dim=-1).clamp(min=1.0)
+            pre_answer_loss = (pre_answer_per_token * aligned_ans_mask).sum(dim=-1) / pre_answer_den
+            pre_answer_loss = pre_answer_loss_weight * pre_answer_loss
+        else:
+            pre_answer_loss = th.zeros_like(terms["mse"])
         # cosine_similarity_loss = mean_flat(1 - F.cosine_similarity(ans_emb_pre, ans_emb, dim=-1))
 
         cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']

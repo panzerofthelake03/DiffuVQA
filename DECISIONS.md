@@ -6,6 +6,155 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ## 2026-05-11
 
+### [KARAR] `gaussian_diffusion.py` — Training noising branch, sampling varsayılanıyla hizalandı
+
+**Sorun:** Sampling tarafında answer segmenti saf noise'tan başlatılırken (`sample_vqa_GPU.py`), training tarafında `training_losses_seq2seq` içinde answer embedding'i yalnızca loss hedefi değil, aynı zamanda `q_sample`'ın `add_information` dalına `f = cond_x_start` üzerinden geri besleniyordu. Bu, inference'ta bulunmayan ek bir kısayol demekti: model eğitimde answer manifolduna daha yakın bir noising süreci görürken, testte bu sinyali alamıyordu.
+
+**Uygulanan değişiklikler (`diffuvqa/gaussian_diffusion.py`):**
+
+1. **Yeni runtime bayrakları okundu:**
+    ```python
+    use_noising_f = bool(getattr(getattr(real_model, 'args', None), 'use_noising_f', False))
+    pre_answer_loss_weight = float(getattr(getattr(real_model, 'args', None), 'pre_answer_loss_weight', 0.0))
+    ```
+
+2. **Training sırasında auxiliary noising branch opsiyonel hale getirildi:**
+    ```python
+    f = cond_x_start if use_noising_f else None
+    ```
+
+3. **`q_sample` çağrısı training objective'e göre koşullandırıldı:**
+    ```python
+    x_t = self.q_sample(
+        cond_x_start,
+        f,
+        t,
+        noise=noise,
+        mask=mask_to_use,
+        add_information=use_noising_f,
+    )
+    ```
+
+4. **Varsayılan davranış değişti:** `use_noising_f=False` iken answer embedding'i training sırasında auxiliary noising dalından tekrar enjekte edilmiyor. Böylece eğitim, sampling'in mevcut varsayılanıyla aynı semantiğe yaklaşıyor: answer bölgesi ek answer-side shortcut olmadan denoise ediliyor.
+
+**Önemli not:** `x_start_mean = ans_emb` korunmuştur. Yani diffusion hâlâ temiz answer embedding'ini `x_0` hedefi olarak öğrenir; değiştirilen kısım, bunun noising dalı içinde ikinci kez ek conditioning sinyali olarak kullanılmamasıdır.
+
+**Neden bu çözüm seçildi:**
+- Kök problem `pre_answer_loss` eksikliğinden önce training ve inference arasında objective uyuşmazlığıydı.
+- `x_start_mean`'i tamamen rastgele yapmak diffusion hedefini anlamsızlaştırır; buna karşılık auxiliary noising shortcut'ını kapatmak, generative semantiği koruyup mismatch'i azaltır.
+- Bu çözüm sampling tarafını geri bozmaz; sadece training'in daha dürüst bir görev çözmesini sağlar.
+
+**Beklenen etki:**
+- Training sırasında model answer embedding'ine inference'ta sahip olmadığı bir yoldan erişmez.
+- Kısa vadede metrikler düşebilir; çünkü önceki daha kolay training sinyali kaldırılmış olur.
+- Orta vadede gerçek üretim kalitesi ile offline eval arasındaki fark azalır.
+
+**Risk/Trade-off:**
+- Eski checkpoint'ler bu yeni objective ile birebir uyumlu değildir; aynı run içinde eski ve yeni objective'i karıştırmak karşılaştırmayı bozar.
+- `use_noising_f=True` ile üretilmiş historical run'lar ayrı deney ailesi olarak ele alınmalıdır.
+
+---
+
+### [KARAR] `gaussian_diffusion.py` — `pre_answer_loss` kaldırılmadı, kontrollü ablation bayrağına çevrildi
+
+**Sorun:** `pre_answer_loss` tamamen kapalıyken bunu geri eklemek isteyen deney ihtiyacı oluştu. Ancak bu loss'u sabit olarak açmak, `ans_emb_pre` ile `ans_emb` arasındaki mesafeyi her zaman minimize ederek fusion/CVAE kolunu ham token-embedding manifolduna zorlayabilir.
+
+**Uygulanan değişiklikler (`diffuvqa/gaussian_diffusion.py`):**
+
+1. **Yeni ağırlık bayrağı eklendi:**
+    ```python
+    pre_answer_loss_weight = float(getattr(getattr(real_model, 'args', None), 'pre_answer_loss_weight', 0.0))
+    ```
+
+2. **Loss, sadece ağırlık sıfırdan büyükse hesaplanıyor:**
+    ```python
+    if pre_answer_loss_weight > 0:
+        pre_answer_len = min(ans_emb_pre.size(1), x_start_mean.size(1))
+        aligned_ans_emb_pre = ans_emb_pre[:, :pre_answer_len, :]
+        aligned_ans_emb = x_start_mean[:, :pre_answer_len, :]
+        aligned_ans_mask = ans_len_mask[:, :pre_answer_len]
+        pre_answer_per_token = ((aligned_ans_emb_pre - aligned_ans_emb) ** 2).mean(dim=-1)
+        pre_answer_den = aligned_ans_mask.sum(dim=-1).clamp(min=1.0)
+        pre_answer_loss = (pre_answer_per_token * aligned_ans_mask).sum(dim=-1) / pre_answer_den
+        pre_answer_loss = pre_answer_loss_weight * pre_answer_loss
+    else:
+        pre_answer_loss = th.zeros_like(terms["mse"])
+    ```
+
+3. **Padding-aware hizalama eklendi:** `ans_emb_pre` ve `x_start_mean` uzunluk uyuşmazlıklarında minimum ortak uzunluğa kırpılıyor; loss sadece gerçek answer tokenlarında hesaplanıyor.
+
+**Neden bu çözüm seçildi:**
+- `pre_answer_loss` artık ana objective'in parçası değil, açıkça bir ablation aracı.
+- Metric recovery denemeleri ile clean generative training birbirinden ayrılmış oldu.
+- Varsayılan `0.0` değeriyle üretim semantiği korunuyor; yalnızca bilinçli deneylerde ekstra supervision açılıyor.
+
+**Beklenen etki:**
+- Default run'lar leakage'siz ve daha doğru generative hedefte kalır.
+- Gerekirse kısa deneylerde küçük bir `pre_answer_loss_weight` ile fusion supervision katkısı ölçülebilir.
+
+**Önerilen kullanım:**
+- Clean generative training: `pre_answer_loss_weight = 0.0`
+- Metric recovery ablation: önce `0.05`, sonra `0.1` gibi küçük değerler
+
+---
+
+### [KARAR] `diffuvqa/config.json` — Yeni eğitim objective bayrakları varsayılan config'e eklendi
+
+**Eklenen alanlar:**
+```json
+"use_noising_f": false,
+"pre_answer_loss_weight": 0.0
+```
+
+**Neden:**
+- `train.py` ve notebook akışı `load_defaults_config()` üzerinden beslendiği için yeni objective davranışının yalnızca kod içinde değil, varsayılan runtime config'te de açıkça tanımlı olması gerekiyordu.
+- Bu sayede yeni training run'lar sessizce eski objective'e dönmez.
+
+**Beklenen etki:**
+- Eğitim komutu ek argüman verilmeden de yeni hizalı semantiği kullanır.
+- `training_args.json` içine bu alanlar yazılacağı için checkpoint ailesi daha net ayrışır.
+
+---
+
+### [KARAR] `shared/run_diffuvqa_colab.ipynb` — Notebook, yeni training objective'i açık ve güvenli biçimde kontrol edecek şekilde güncellendi
+
+**Sorun:** Değişiklikler yalnızca Python kodunda kalırsa Colab üzerinden yapılan eğitimler eski varsayımla devam edebilirdi. Ayrıca resume edilen checkpoint'in farklı objective ile eğitilmiş olması sessizce karışıklık yaratırdı.
+
+**Uygulanan değişiklikler (`shared/run_diffuvqa_colab.ipynb`):**
+
+1. **Konfigürasyon hücresine iki yeni alan eklendi:**
+    ```python
+    USE_NOISING_F = False
+    PRE_ANSWER_LOSS_WEIGHT = 0.0
+    ```
+
+2. **Açıklama hücresi güncellendi:** Kullanıcının özellikle bu iki alanı bilinçli seçmesi gerektiği not edildi.
+
+3. **Eğitim komutuna yeni flag'ler geçirildi:**
+    ```bash
+    --use_noising_f {USE_NOISING_F}
+    --pre_answer_loss_weight {PRE_ANSWER_LOSS_WEIGHT}
+    ```
+
+4. **Resume uyumluluk kontrolü genişletildi:** Notebook artık `training_args.json` içindeki
+    - `use_noising_f`
+    - `pre_answer_loss_weight`
+  değerlerini de mevcut runtime ayarlarıyla karşılaştırıyor.
+
+5. **Objective mismatch için fail-fast davranışı eklendi:** Eğer eski checkpoint başka bir training objective ile eğitildiyse notebook açık hata veriyor ve kullanıcıyı `RESUME_CHECKPOINT='none'` yapmaya yönlendiriyor.
+
+**Neden bu çözüm seçildi:**
+- Colab notebook bu projenin ana çalıştırma yüzeyi; objective değişikliğinin burada görünmez kalması kabul edilebilir değil.
+- Resume sırasında sessiz uyumsuzluk, metrik karşılaştırmalarını anlamsızlaştırır.
+- Deney tekrarlanabilirliği için objective parametreleri checkpoint metadata'sına yazılmalı ve notebook bunu doğrulamalı.
+
+**Beklenen etki:**
+- Notebook'tan başlatılan tüm yeni run'lar aynı objective'i açıkça kullanır.
+- Eski checkpoint'lerle yanlış resume girişimleri erken aşamada durdurulur.
+- Clean generative run ile auxiliary-loss ablation run'ı operasyonel olarak ayrılır.
+
+---
+
 ### [KARAR] gaussian_diffusion.py — Seçenek 2: Eğitimde ans_len_mask ile loss maskeleme
 
 **Sorun:** `training_losses_seq2seq` içinde MSE ve NLL loss'ları tüm cevap pozisyonlarına eşit uygulanıyordu. Kısa cevapların PAD tokenlarına da gradient akıyordu; model kısa cevap üretmeyi doğal yoldan öğrenemiyordu.

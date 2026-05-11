@@ -145,6 +145,32 @@
 
 ## 2026-05-11
 
+### Decision 19: Align diffusion training noising path with non-leaky sampling default
+- Files: diffuvqa/gaussian_diffusion.py, diffuvqa/config.json
+- Change: Added runtime flag `use_noising_f` and defaulted it to `false` in config.
+- Change: In `training_losses_seq2seq`, `f` is now set to `cond_x_start` only when `use_noising_f=True`; otherwise `f=None` and `q_sample(..., add_information=False)` is used.
+- Change: Preserved `x_start_mean = ans_emb` as the clean denoising target; only the auxiliary noising shortcut was disabled by default.
+- Reason: Training previously re-injected answer-side semantic signal through the auxiliary noising branch, while sampling defaulted to a harder non-leaky setup with no such shortcut.
+- Concern: Historical checkpoints trained with the old shortcut behavior are not directly comparable to new runs that keep `use_noising_f=false`.
+- Follow-up: Treat old and new runs as separate experiment families and avoid resuming across this objective boundary unless the flag is intentionally matched.
+
+### Decision 20: Make pre_answer_loss an explicit weighted ablation instead of a hidden fixed behavior
+- Files: diffuvqa/gaussian_diffusion.py, diffuvqa/config.json
+- Change: Added runtime flag `pre_answer_loss_weight` with default `0.0`.
+- Change: `pre_answer_loss` is now computed only when the weight is positive, with length alignment and answer-padding masking before contribution to total loss.
+- Reason: The auxiliary fusion supervision may help metric recovery, but it should not silently redefine the main generative objective.
+- Concern: Large weights can pull the fusion branch toward the raw token-embedding manifold and distort conditioning quality.
+- Follow-up: If ablation is needed, start with small values such as `0.05` or `0.1` and compare empty-answer rate, exact match, and qualitative answer grounding against the default `0.0` run.
+
+### Decision 21: Update Colab notebook to expose and validate the new training objective controls
+- File: shared/run_diffuvqa_colab.ipynb
+- Change: Added `USE_NOISING_F` and `PRE_ANSWER_LOSS_WEIGHT` to the notebook configuration cell.
+- Change: Passed both flags through the training command cell to `train.py`.
+- Change: Extended resume checkpoint compatibility checks to compare `use_noising_f` and `pre_answer_loss_weight` against the checkpoint's `training_args.json`.
+- Reason: The notebook is the main execution surface; objective changes must be visible, intentional, and validated before long training runs.
+- Concern: Users may try to resume older checkpoints with mismatched objective flags and assume this is a safe continuation.
+- Follow-up: When resuming, keep the objective flags identical to the checkpoint metadata; otherwise start a fresh run with `RESUME_CHECKPOINT='none'`.
+
 ### Decision 18: Align Bio-Bert runtime path to Bert-style implementation for speed and simplicity
 - Files: diffuvqa/vqa_model.py, shared/basic_utils.py, sample_vqa_GPU.py
 - Change: Removed unused Pooler class from model fusion code.

@@ -45,6 +45,8 @@
   "predict_xstart": true,
   "rescale_timesteps": true,
   "rescale_learned_sigmas": false,
+  "use_noising_f": false,
+  "pre_answer_loss_weight": 0.0,
   "use_resnet152": false,
   "sigma_small": false,
   "emb_scale_factor": 1.0,
