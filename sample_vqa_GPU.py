@@ -35,8 +35,6 @@ from shared.basic_utils import (
     add_dict_to_argparser,
     args_to_dict,
     load_tokenizer,
-    validate_runtime_model_args,
-    resolve_runtime_model_args,
 )
 
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -112,15 +110,6 @@ def main():
     logger.log(f">>> diffusion_steps before: {original_diffusion_step}")
     if(original_diffusion_step is not None):
         args.step = original_diffusion_step
-
-    try:
-        validate_runtime_model_args(args)
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid checkpoint/runtime model configuration for {args.model_path}: {exc}"
-        ) from exc
-
-    resolve_runtime_model_args(args)
 
     num_steps = args.diffusion_steps
 

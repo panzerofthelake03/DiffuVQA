@@ -8,138 +8,6 @@ from diffuvqa.gaussian_diffusion import SpacedDiffusion, space_timesteps
 from diffuvqa.vqa_model import TransformerNetModel
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
-
-MODEL_RUNTIME_PRESETS = {
-    'transformer-bert': {
-        'model': 'transformer-bert',
-        'vocab': 'bert',
-        'config_name': 'bert-base-uncased',
-        'use_plm_init': 'bert',
-    },
-    'transformer-bio-bert': {
-        'model': 'transformer-bio-bert',
-        'vocab': 'bio-bert',
-        'config_name': 'dmis-lab/biobert-v1.1',
-        'use_plm_init': 'bert',
-    },
-    'transformer-roberta': {
-        'model': 'transformer-roberta',
-        'vocab': 'roberta',
-        'config_name': 'roberta-large',
-        'use_plm_init': 'roberta',
-    },
-}
-
-
-def _normalize_runtime_choice(value):
-    if value is None:
-        return ''
-    return str(value).strip().lower().replace('_', '-').replace(' ', '-')
-
-
-def _preset_from_model(value):
-    normalized = _normalize_runtime_choice(value)
-    if normalized in MODEL_RUNTIME_PRESETS:
-        return normalized
-    return ''
-
-
-def _preset_from_vocab(value):
-    normalized = _normalize_runtime_choice(value)
-    if normalized == 'bert':
-        return 'transformer-bert'
-    if normalized in {'bio-bert', 'biobert'}:
-        return 'transformer-bio-bert'
-    if normalized == 'roberta':
-        return 'transformer-roberta'
-    return ''
-
-
-def _preset_from_config_name(value):
-    normalized = _normalize_runtime_choice(value)
-    if normalized == 'bert-base-uncased':
-        return 'transformer-bert'
-    if normalized == 'dmis-lab/biobert-v1.1':
-        return 'transformer-bio-bert'
-    if normalized == 'roberta-large':
-        return 'transformer-roberta'
-    return ''
-
-
-def _preset_from_use_plm_init(value):
-    normalized = _normalize_runtime_choice(value)
-    if normalized in {'bio-bert', 'biobert'}:
-        return 'transformer-bio-bert'
-    if normalized == 'roberta':
-        return 'transformer-roberta'
-    if normalized == 'bert':
-        return ''
-    return ''
-
-
-def _collect_runtime_family_signals(args):
-    signals = []
-
-    model_preset = _preset_from_model(getattr(args, 'model', None))
-    if model_preset:
-        signals.append(('model', model_preset, getattr(args, 'model', None)))
-
-    vocab_preset = _preset_from_vocab(getattr(args, 'vocab', None))
-    if vocab_preset:
-        signals.append(('vocab', vocab_preset, getattr(args, 'vocab', None)))
-
-    config_preset = _preset_from_config_name(getattr(args, 'config_name', None))
-    if config_preset:
-        signals.append(('config_name', config_preset, getattr(args, 'config_name', None)))
-
-    init_preset = _preset_from_use_plm_init(getattr(args, 'use_plm_init', None))
-    if init_preset:
-        signals.append(('use_plm_init', init_preset, getattr(args, 'use_plm_init', None)))
-
-    return signals
-
-
-def resolve_runtime_model_args(args, strict=False):
-    signals = _collect_runtime_family_signals(args)
-    distinct_presets = sorted({preset for _, preset, _ in signals})
-
-    if strict and len(distinct_presets) > 1:
-        signal_summary = ", ".join(
-            f"{source}={raw!r} -> {preset}" for source, preset, raw in signals
-        )
-        raise ValueError(
-            "Conflicting runtime model settings detected: "
-            f"{signal_summary}. Align model/vocab/config_name/use_plm_init first."
-        )
-
-    chosen_preset = ''
-    for source_name in ('vocab', 'config_name', 'model', 'use_plm_init'):
-        for source, preset, _ in signals:
-            if source == source_name:
-                chosen_preset = preset
-                break
-        if chosen_preset:
-            break
-
-    if not chosen_preset:
-        chosen_preset = _preset_from_model(getattr(args, 'model', None))
-
-    if not chosen_preset:
-        return args
-
-    preset_values = MODEL_RUNTIME_PRESETS[chosen_preset]
-    for key, value in preset_values.items():
-        setattr(args, key, value)
-
-    if hasattr(args, 'language_encoder_name'):
-        args.language_encoder_name = preset_values['config_name']
-
-    return args
-
-
-def validate_runtime_model_args(args):
-    return resolve_runtime_model_args(args, strict=True)
-
 class myTokenizer():
     """
     Load tokenizer from bert config or defined BPE vocab dict
@@ -148,7 +16,6 @@ class myTokenizer():
     ### You can custome your own tokenizer here. ###
     ################################################
     def __init__(self, args):
-        resolve_runtime_model_args(args)
         if args.vocab == 'bert':
             tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
             self.tokenizer = tokenizer
@@ -266,7 +133,6 @@ def load_defaults_config():
 
 
 def create_model_and_diffusion(args):
-    resolve_runtime_model_args(args)
     # model = TransformerNetModel(
     #     input_dims=hidden_dim,
     #     output_dims=(hidden_dim if not learn_sigma else hidden_dim*2),
@@ -282,16 +148,16 @@ def create_model_and_diffusion(args):
     elif args.model == 'transformer':
         model = TransformerNet(args=args)
 
-    elif args.model in MODEL_RUNTIME_PRESETS:
+    elif args.model == 'transformer-bio-bert':
         output_dims = args.hidden_dim * 2 if getattr(args, 'learn_sigma', False) else args.hidden_dim
         model = TransformerNetModel(
             input_dims=args.hidden_dim,
             output_dims=output_dims,
             hidden_t_dim=args.hidden_t_dim,
             dropout=args.dropout,
-            config_name=args.config_name,
+            config_name='dmis-lab/biobert-v1.1',
             vocab_size=args.vocab_size,
-            init_pretrained=args.use_plm_init,
+            init_pretrained='bert',
             args=args
         )
 

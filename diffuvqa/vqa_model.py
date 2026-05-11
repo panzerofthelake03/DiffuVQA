@@ -3,6 +3,7 @@ from transformers import AutoConfig
 from transformers import RobertaConfig, RobertaModel
 from transformers.models.bert.modeling_bert import BertConfig, BertModel, BertEncoder
 
+import os
 import torch
 
 import numpy as np
@@ -24,19 +25,6 @@ from diffuvqa.utils.answer_pre import find_most_similar_answers
 ##############################################################
 ###########  vision and text feature fusion     #############
 #############################################################
-class Pooler(nn.Module):
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.dense = nn.Linear(hidden_size, hidden_size)
-        self.activation = nn.Tanh()
-
-    def forward(self, hidden_states):
-        first_token_tensor = hidden_states[:, 0]
-        pooled_output = self.dense(first_token_tensor)
-        pooled_output = self.activation(pooled_output)
-        return pooled_output
-
-
 class CVAE(nn.Module):
     def __init__(self, embedding_dim):
         super(CVAE, self).__init__()
@@ -83,20 +71,21 @@ class feature_fusion(nn.Module):
 
         self.language_encoder = language_encoder
         self.bert = bert
-        # Keep a direct reference to bert.embeddings so the full embedding
-        # stack (word + positional + token_type + LayerNorm) is accessible
-        # even after the caller deletes temp_bert.embeddings.
-        self.bert_embeddings = bert.embeddings
+        self.position_embeddings = bert.embeddings.position_embeddings
+        self.token_type_embeddings = bert.embeddings.token_type_embeddings
+        self.bert_embedding_layer_norm = bert.embeddings.LayerNorm
+        self.bert_embedding_dropout = bert.embeddings.dropout
         self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
         self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
 
-        # Project raw vision encoder channel features to the configured image embedding size.
-        # Historically this code used 145 as the number of channels produced by
-        # the pretrained CLIP/resnet visual backbone; keep that here for
-        # compatibility with pre-trained weights. If you use a different visual
-        # backbone adjust this number accordingly.
-        self.image_MLP = nn.Linear(145, args.input_image_embed_size)
+        # Probe vision output channels once so image_MLP input matches the selected backbone.
+        with torch.no_grad():
+            dummy_image = torch.zeros(1, 3, args.image_resolution, args.image_resolution)
+            dummy_features = self.vision_encoder(dummy_image)
+            vision_channels = dummy_features.size(1)
+
+        self.image_MLP = nn.Linear(vision_channels, args.input_image_embed_size)
         self.image_MLP.apply(self.init_weights)
 
         # modality type embeddings (0=text,1=image)
@@ -142,10 +131,14 @@ class feature_fusion(nn.Module):
         q_ids = cond.pop('input_q_id')
         q_mask = (q_ids != 0).long().to(q_ids.device)
         q_input_shape = q_mask.size()
-        # Use the full BERT embedding stack (word + positional + token_type +
-        # LayerNorm) so the encoder layers receive the expected input format
-        # and pretrained positional knowledge is preserved.
-        question_emb = self.bert_embeddings(input_ids=q_ids)
+        token_emb = self.language_encoder(q_ids)
+        seq_len = q_ids.size(1)
+        position_ids = torch.arange(seq_len, dtype=torch.long, device=q_ids.device).unsqueeze(0)
+        token_type_ids = torch.zeros_like(q_ids)
+        position_emb = self.position_embeddings(position_ids)
+        token_type_emb = self.token_type_embeddings(token_type_ids)
+        question_emb = self.bert_embedding_layer_norm(token_emb + position_emb + token_type_emb)
+        question_emb = self.bert_embedding_dropout(question_emb)
         extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, dtype=question_emb.dtype)
         for layer in self.bert.encoder.layer:
             question_feats = layer(question_emb, extended_q_masks)[0]
@@ -191,19 +184,14 @@ class feature_fusion(nn.Module):
         f3 = self.layer_norm(f3)
         f4 = self.feature_proj(f3)
 
-        # Ensure q_for_image is defined and all tensors have the same sequence length
-        # by pooling-and-expanding the shorter sequences to match image_feats.
-        if 'q_for_image' not in locals():
-            # Create q_for_image by pooling question tokens and expanding to image length
-            if question_feats.size(1) != image_feats.size(1):
-                q_for_image = question_feats.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
-            else:
-                q_for_image = question_feats
+        target_len = image_feats.size(1)
+        if question_feats.size(1) != target_len:
+            q_for_image = question_feats.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+        else:
+            q_for_image = question_feats
 
-        # If f4 has a different sequence length, pool-and-expand it as well so
-        # the final element-wise combination works without size mismatch.
-        if f4.size(1) != image_feats.size(1):
-            f4 = f4.mean(dim=1, keepdim=True).expand(-1, image_feats.size(1), -1)
+        if f4.size(1) != target_len:
+            f4 = f4.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
 
         # Debug print (optional) controlled by environment variable DVQA_DEBUG
         try:
@@ -267,12 +255,8 @@ class TransformerNetModel(nn.Module):
         self.hidden_size = config.hidden_size
 
         self.word_embedding = nn.Embedding(vocab_size, self.input_dims)
-        self.lm_head = nn.Linear(self.input_dims, vocab_size)
-        with th.no_grad():
-            # Copy initial values without tying parameters — they can diverge
-            # during training so the diffusion embedding space and the
-            # vocabulary projection don't fight each other.
-            self.lm_head.weight.data.copy_(self.word_embedding.weight.data)
+        self.lm_head = nn.Linear(self.input_dims, vocab_size, bias=False)
+        nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.02)
 
         time_embed_dim = hidden_t_dim * 4
         self.time_embed = nn.Sequential(
@@ -321,11 +305,6 @@ class TransformerNetModel(nn.Module):
             except Exception:
                 pass
             self.fuse = feature_fusion(self.word_embedding, temp_bert, args)
-
-            with th.no_grad():
-                # Copy pretrained values without tying — lm_head and
-                # word_embedding update independently from this point on.
-                self.lm_head.weight.data.copy_(self.word_embedding.weight.data)
 
             self.input_transformers = temp_bert.encoder
             self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))

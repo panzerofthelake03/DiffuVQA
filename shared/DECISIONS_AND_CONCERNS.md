@@ -142,3 +142,20 @@
 - Reason: Generated answers were often overlong; this fix trims noisy tails without retraining and is compatible with existing checkpoints.
 - Concern: Threshold sensitivity can affect recall vs precision tradeoff, especially for weaker checkpoints.
 - Follow-up: Run threshold sweep at 0.2, 0.3, 0.4 and compare empty-answer rate, exact match, and qualitative answer brevity.
+
+## 2026-05-11
+
+### Decision 18: Align Bio-Bert runtime path to Bert-style implementation for speed and simplicity
+- Files: diffuvqa/vqa_model.py, shared/basic_utils.py, sample_vqa_GPU.py
+- Change: Removed unused Pooler class from model fusion code.
+- Change: Replaced hardcoded image projection input channels with one-time dynamic probing from the selected vision encoder.
+- Change: Replaced direct bert.embeddings module call with explicit token plus position plus token-type plus LayerNorm plus dropout composition.
+- Change: Replaced fragile locals-based sequence alignment with explicit target_len-based pooling and expansion logic.
+- Change: Switched lm_head to bias=False with normal initialization (no word embedding weight copy).
+- Change: Removed runtime model-family preset normalization and strict validation helpers from shared/basic_utils.py.
+- Change: Simplified model factory to a direct transformer-bert construction path for the Bio-Bert configuration.
+- Change: Removed sampling-time imports and calls that depended on runtime preset validation and resolution.
+- Change: Renamed model factory key from transformer-bert to transformer-bio-bert in shared/basic_utils.py and diffuvqa/config.json to reflect the actual pretrained weights and avoid confusion with the generic Bert branch.
+- Reason: Reduce startup overhead, reduce early-step jitter from backend warm-up effects, and make the Bio-Bert code path structurally closer to Bert branch behavior while keeping the model identifier self-descriptive.
+- Concern: Existing checkpoints trained before this change are not strict-load compatible when key paths include fuse.bert_embeddings.* and when lm_head.bias exists.
+- Follow-up: Add and use a checkpoint key migration utility for legacy runs, or resume only from checkpoints produced after this refactor.
