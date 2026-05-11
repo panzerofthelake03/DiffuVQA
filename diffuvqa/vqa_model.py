@@ -143,6 +143,7 @@ class feature_fusion(nn.Module):
         for layer in self.bert.encoder.layer:
             question_feats = layer(question_emb, extended_q_masks)[0]
         question_feats = self.question_feature_proj(question_feats)  # B 32 768
+        question_emb_proj = self.question_feature_proj(question_emb)
 
         # print("q:", question_feats.shape)
 
@@ -190,6 +191,11 @@ class feature_fusion(nn.Module):
         else:
             q_for_image = question_feats
 
+        if question_emb_proj.size(1) != target_len:
+            question_emb_for_image = question_emb_proj.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+        else:
+            question_emb_for_image = question_emb_proj
+
         if f4.size(1) != target_len:
             f4 = f4.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
 
@@ -200,7 +206,7 @@ class feature_fusion(nn.Module):
         except Exception:
             pass
 
-        f = self.alpha * f4 + self.beta * image_feats + self.theta * q_for_image
+        f = self.alpha * f4 + self.beta * image_feats + self.theta * (q_for_image + question_emb_for_image)
         return f, pre_simu_answer_feats
     
     def init_weights(self, module):
@@ -356,6 +362,14 @@ class TransformerNetModel(nn.Module):
                 self.fuse_output_proj.weight.data.normal_(mean=0.0, std=0.02)
                 if self.fuse_output_proj.bias is not None:
                     self.fuse_output_proj.bias.data.zero_()
+        except Exception:
+            pass
+
+        # Re-enable embedding/logit weight tying when dimensions match.
+        # This keeps token embedding and vocabulary projection in the same manifold.
+        try:
+            if self.lm_head.weight.shape == self.word_embedding.weight.shape:
+                self.lm_head.weight = self.word_embedding.weight
         except Exception:
             pass
 

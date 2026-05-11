@@ -270,6 +270,45 @@ nll = th.where(mask.sum(dim=-1) == 0,               # tamamen PAD satır → los
 
 ---
 
+### [KARAR] Run C — `diffuvqa/vqa_model.py` içinde iki değişiklik birlikte uygulandı
+
+**İstek:** Aynı anda iki mimari güncelleme:
+1. `lm_head` ile `word_embedding` weight tying'i tekrar açmak
+2. Fusion çıkışında `question_emb` residual katkısını eklemek
+
+**Uygulanan değişiklikler (`diffuvqa/vqa_model.py`):**
+
+1. **Fusion residual güncellemesi:**
+    - `question_emb` değerleri `question_feature_proj` ile latent boyuta projekte edildi.
+    - Image token uzunluğuna hizalamak için `mean+expand` mantığı eklendi.
+    - Son fusion denklemi şu hale getirildi:
+    ```python
+    f = self.alpha * f4 + self.beta * image_feats + self.theta * (q_for_image + question_emb_for_image)
+    ```
+
+2. **Weight tying tekrar açıldı (shape-safe):**
+    ```python
+    if self.lm_head.weight.shape == self.word_embedding.weight.shape:
+        self.lm_head.weight = self.word_embedding.weight
+    ```
+    - Boyutlar eşleşmiyorsa tying yapılmıyor; böylece boyut uyuşmazlığı olan konfigürasyonlar kırılmıyor.
+
+**Neden bu çözüm seçildi:**
+- Tek adımda hem embedding-space/logit-space hizalaması güçlendirildi (weight tying),
+- hem de soru token bilgisinin fusion çıkışına doğrudan residual katkısı eklendi.
+
+**Beklenen etki:**
+- Vocabulary projection tarafında daha stabil gradient akışı.
+- Özellikle kısa cevap üretiminde soru semantiğinin daha güçlü taşınması.
+
+**Risk/Trade-off:**
+- Önceki untied eğitim aileleriyle metrik karşılaştırmalarında dağılım farkı görülebilir.
+- Eğer farklı bir konfigürasyonda embedding/logit boyutları farklıysa tying otomatik pas geçileceği için bu değişikliğin etkisi o run'da görülmeyebilir.
+
+**Durum:** Uygulandı.
+
+---
+
 ## 2026-05-10
 
 ### [BUGFIX] sample_vqa_GPU.py — `decode_token()` tensor type hatasının düzeltilmesi
