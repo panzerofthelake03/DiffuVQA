@@ -2,10 +2,10 @@
 
 ## Aktif Görevler
 
-- [ ] Bert 150k eğitimi tamamlanınca sampling yap ve sonuçları değerlendir
+- [ ] Bert 200k eğitimi tamamlanınca (her 5k'da) sampling yap ve sonuçları değerlendir
+- [ ] 200k sonrası sampling sweep: `(decode_top_k=5, min_answer_tokens=2, conf=0.25)`, `(5, 2, 0.20)`, `(7, 2, 0.20)` kombinasyonlarını dene
 - [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
-- [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (150k sonrası)
-- [ ] Sonraki training run için Seçenek 2 uygula — `gaussian_diffusion.py` training_losses'da padding mask ile loss masking
+- [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (200k sonrası)
 
 ## Tamamlanan Görevler
 
@@ -61,3 +61,11 @@
 - [x] `eval/eval_DiffuVQA.py` — BERTScore tqdm duplicate satır sorunu düzeltildi: `verbose=False` + `logging.disable` + `warnings.catch_warnings` eklendi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — `RESUME_CHECKPOINT` 50k olarak güncellendi (`ema_0.9999_050000.pt`)
 - [x] `sample_vqa_GPU.py` — Top-k rerank + minimum cevap uzunluğu iyileştirmesi eklendi (`decode_top_k`, `min_answer_tokens`, `short_answer_penalty`)
+- [x] `diffuvqa/gaussian_diffusion.py` — Seçenek 2: Padding mask loss masking uygulandı (`ans_len_mask` ile MSE/NLL/t0_loss sadece gerçek token pozisyonlarında)
+- [x] `diffuvqa/gaussian_diffusion.py` — `use_noising_f` bayrağı eklendi (default False — training/inference hizalı)
+- [x] `diffuvqa/gaussian_diffusion.py` — `pre_answer_loss_weight` koşullu hale getirildi (default 0.0)
+- [x] `diffuvqa/vqa_model.py` — lm_head weight tying geri yüklendi (avg_nn_l2 divergence düzeltildi)
+- [x] `diffuvqa/vqa_model.py` — `feature_fusion` question_emb residual eklendi (baseline pattern)
+- [x] `diffuvqa/config.json` — `use_noising_f` ve `pre_answer_loss_weight` bayrakları eklendi
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — 200k eğitim config güncellendi (LEARNING_STEPS=200000, SAVE_INTERVAL=5000, RESUME_CHECKPOINT=None)
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — Training hücresi `--use_noising_f` ve `--pre_answer_loss_weight` argümanları eklendi

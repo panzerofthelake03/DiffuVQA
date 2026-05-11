@@ -207,7 +207,12 @@ class feature_fusion(nn.Module):
         assert f4.size(1) == image_feats.size(1) == q_for_image.size(1) == target_len, \
             f"feature_fusion length mismatch: f4={f4.size(1)}, image={image_feats.size(1)}, q={q_for_image.size(1)}, target={target_len}"
 
-        f = self.alpha * f4 + self.beta * image_feats + self.theta * q_for_image
+        # question_emb (raw token embedding) added as residual — baseline's
+        # theta * (question_feats + question_emb) pattern, preserves token-level
+        # semantic signal alongside projected cross-attended features.
+        if question_emb.size(1) != target_len:
+            question_emb = question_emb.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+        f = self.alpha * f4 + self.beta * image_feats + self.theta * (q_for_image + question_emb)
         return f, pre_simu_answer_feats
     
     def init_weights(self, module):
@@ -262,12 +267,9 @@ class TransformerNetModel(nn.Module):
         self.hidden_size = config.hidden_size
 
         self.word_embedding = nn.Embedding(vocab_size, self.input_dims)
-        # lm_head is an independent projection — not tied to word_embedding.
-        # Tying forces word_embedding and lm_head to optimize against each other
-        # (diffusion pushes embeddings while NLL pulls them back toward vocab),
-        # which prevents the model from learning a stable answer manifold.
         self.lm_head = nn.Linear(self.input_dims, vocab_size, bias=False)
-        nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.02)
+        with th.no_grad():
+            self.lm_head.weight = self.word_embedding.weight
 
         time_embed_dim = hidden_t_dim * 4
         self.time_embed = nn.Sequential(

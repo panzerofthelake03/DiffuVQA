@@ -636,12 +636,12 @@ class GaussianDiffusion:
         # Call the underlying model APIs
         ddpm_input_pre, ans_emb_pre = real_model.get_ddpm_input(image, model_kwargs)
 
+        # Read optional objective flags from model args (default: off)
+        _model_args = getattr(real_model, 'args', None)
+        use_noising_f         = bool(getattr(_model_args, 'use_noising_f', False))
+        pre_answer_loss_weight = float(getattr(_model_args, 'pre_answer_loss_weight', 0.0))
+
         ans_emb = real_model.get_embeds(input_ids_a)
-        # x_start_mean = clean answer embedding — defines the target manifold for
-        # diffusion. x_start is a noisy sample around this mean (reparametrization).
-        # The model learns to map x_t → x_start_mean (the answer embedding).
-        # Data leakage is prevented by restricting the MSE loss to the answer
-        # segment only (fuse tokens are excluded from the loss, not from x_start).
         x_start_mean = ans_emb
         cond_x_start_mean = torch.cat([ddpm_input_pre, x_start_mean], dim=1)
 
@@ -655,74 +655,73 @@ class GaussianDiffusion:
         if noise is None:
             noise = th.randn_like(cond_x_start)
 
-        # f = clean mean [fuse | ans_emb] — fed into q_sample's add_information
-        # branch so the noise schedule mixes toward the answer manifold, not
-        # toward a noisy x_start. This keeps the learned reverse process anchored
-        # to the answer embedding space.
-        f = cond_x_start_mean
-
-        # Sanity check shapes: q_sample expects x_start and f to have identical
-        # shapes. If they differ, print detailed diagnostics and raise.
-        if cond_x_start.shape != f.shape:
-            print(f"SHAPE MISMATCH before q_sample: cond_x_start={tuple(cond_x_start.shape)}, f={tuple(f.shape)}, ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start={tuple(x_start.shape)}, x_start_mean={tuple(x_start_mean.shape)}", flush=True)
-            raise RuntimeError("cond_x_start and f have different shapes before q_sample")
+        # use_noising_f=False (default): training matches inference — answer segment
+        # starts from pure noise, no answer-side shortcut in the forward process.
+        # use_noising_f=True: CIGN auxiliary conditioning, anchors noise toward
+        # answer manifold (useful for ablation studies).
+        f = cond_x_start_mean if use_noising_f else None
 
         # Align mask with cond_x_start which has shape [B, fuse_len + seq_len].
-        # The original mask covers only answer token positions ([B, seq_len]).
-        # Image-fusion tokens must be frozen (mask=0); answer tokens keep their
-        # original mask values so the diffusion process treats them correctly.
         mask_to_use = mask
         if mask is not None and mask.shape[1] != cond_x_start.shape[1]:
             fuse_token_len = cond_x_start.shape[1] - mask.shape[1]
             if fuse_token_len > 0:
-                # Prepend zeros for image-fusion tokens (frozen, not diffused)
                 fuse_pad = torch.zeros(
                     (mask.shape[0], fuse_token_len), dtype=mask.dtype, device=mask.device
                 )
                 mask_to_use = torch.cat([fuse_pad, mask], dim=1)
             else:
-                # cond_x_start is shorter than mask — truncate to match
                 mask_to_use = mask[:, :cond_x_start.shape[1]]
 
         x_t = self.q_sample(cond_x_start, f, t, noise=noise, mask=mask_to_use.to(x_start.device),
-                            add_information=True)  # reparametrization trick.
+                            add_information=use_noising_f)
 
         get_logits = real_model.get_logits
 
         terms = {}
 
-        # Target is only the answer segment — fuse tokens are frozen conditioning,
-        # not something the model should be penalized for reconstructing.
-        # model_output covers the full [fuse | answer] sequence; slice answer portion.
         fuse_len = ddpm_input_pre.shape[1]
         model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
         assert model_output.shape == cond_x_start.shape
         ans_output = model_output[:, fuse_len:, :]
-        terms["mse"] = mean_flat((ans_emb - ans_output) ** 2)
-        # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
-        # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
-        # pred_xstart over the full [fuse | answer] sequence
+        # Padding mask: only compute MSE loss on real answer tokens, not PAD positions.
+        # This teaches the model to stop at SEP/PAD naturally.
+        pad_id = getattr(_model_args, 'pad_token_id', 0)
+        ans_len_mask = (input_ids_a != pad_id).float()  # [B, seq_len]
+        ans_len_mask_3d = ans_len_mask.unsqueeze(-1)    # [B, seq_len, 1]
+        ans_den = ans_len_mask.sum(dim=-1).clamp(min=1.0)  # [B]
+
+        mse_per_token = ((ans_emb - ans_output) ** 2).mean(dim=-1)  # [B, seq_len]
+        terms["mse"] = (mse_per_token * ans_len_mask).sum(dim=-1) / ans_den
+
         cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']
-        # Extract only the predicted answer portion for all answer-side losses
         model_out_x_start = cond_model_out_x_start[:, fuse_len:, :]
 
         t0_mask = (t == 0)
-        # At t=0 the model should perfectly predict the answer embedding
-        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2)
+        t0_per_token = ((x_start_mean - model_out_x_start) ** 2).mean(dim=-1)
+        t0_loss = (t0_per_token * ans_len_mask).sum(dim=-1) / ans_den
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
 
-        # tT_loss: at the last timestep pure noise should have near-zero mean
         out_mean, _, _ = self.q_mean_variance(x_start_mean, th.LongTensor([self.num_timesteps - 1]).to(x_start_mean.device))
         tT_loss = mean_flat(out_mean ** 2)
 
-        # decoder_nll: regularize predicted answer embeddings toward vocabulary tokens
-        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a)
-        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a)
-        # assert (model.lm_head.weight == model.word_embedding.weight).all()
+        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a, mask=ans_len_mask)
+        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a, mask=ans_len_mask)
 
-        terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll
+        # pre_answer_loss: optional fusion supervision signal.
+        # Pulls feature_fusion's simulated answer (ans_emb_pre) toward the real
+        # answer embedding. Activated only when pre_answer_loss_weight > 0.
+        if pre_answer_loss_weight > 0.0:
+            pre_len = min(ans_emb_pre.size(1), x_start_mean.size(1))
+            pre_per_token = ((ans_emb_pre[:, :pre_len, :] - x_start_mean[:, :pre_len, :]) ** 2).mean(dim=-1)
+            pre_den = ans_len_mask[:, :pre_len].sum(dim=-1).clamp(min=1.0)
+            pre_answer_loss = pre_answer_loss_weight * (pre_per_token * ans_len_mask[:, :pre_len]).sum(dim=-1) / pre_den
+        else:
+            pre_answer_loss = th.zeros_like(terms["mse"])
+
+        terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll + pre_answer_loss
 
         return terms
 

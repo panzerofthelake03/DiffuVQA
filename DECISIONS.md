@@ -56,6 +56,79 @@ terms["mse"] = mean_flat((ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1
 
 ## 2026-05-11
 
+### [KARAR] 100k checkpoint analizi — Mimari kriz teşhisi ve kararlar
+**Bulgular:** 100k BERT checkpoint (seed102, step200, bsize64): BLEU-1=0, ROUGE-L=0, exact match=0, avg_nn_l2=552.
+50k'da avg_nn_l2=416'dan 100k'da 552'ye çıkması — embedding manifoldu iyileşmek yerine geriliyor.
+
+**Kök nedenler:**
+1. **lm_head weight tying kaldırılması (BUG 13):** MSE loss embeddingleri iterasyonla geri itiyor, NLL loss onları vocab matrisine çekiyor. Tying'siz bu zıt gradyanlar ortak sabitleyici nokta bulamıyor → avg_nn_l2 divergence.
+2. **Padding mask loss eksikliği:** Model 64 token output üretmek zorunda ama cevap ortalaması ~3 token. Sonraki 61 pozisyon için da MSE kaybı hesaplanıyor — model SEP/PAD üretmeyi hiç öğrenemiyor. 40+ token gürültü streamleri bu yüzden.
+3. **Training/inference mismatch:** `f=cond_x_start_mean` ile forward process training'de answer bilgisine bağlı ama inference'ta bu bilgi yok — model iki farklı hedef öğreniyor.
+
+---
+
+### [KARAR] `diffuvqa/vqa_model.py` — lm_head weight tying GERİ YÜKLENDİ
+**Değişiklik:** `self.lm_head.weight = self.word_embedding.weight` satırı tüm init bloklarına (bert, pubmedbert, roberta) geri eklendi.
+
+**Neden:** BUG 13 kararı (tying kaldırmak) yanlıştı. avg_nn_l2 metriğinin 50k→100k arasında 416→552'ye gerilemesi doğrudan bu değişiklikten kaynaklanıyor. Tying'siz MSE+NLL zıt gradyanlar embedding manifoldunu çöküştürdü. Tying ile lm_head ve embedding uzayı hizalı kalır — avg_nn_l2 gerilemesi önlenir.
+
+---
+
+### [KARAR] `diffuvqa/vqa_model.py` — `feature_fusion` question_emb residual eklendi
+**Değişiklik:** fusion çıktısı: `f = alpha * f4 + beta * image_feats + theta * (q_for_image + question_emb)` — `question_emb` (raw token embedding) residual olarak eklendi.
+
+**Neden:** Baseline DiffuVQA (cloneiq/DiffuVQA) bu pattern'ı kullanıyor. `question_feats` encoder'ı geçmiş yüksek-seviye temsil; `question_emb` token-level semantik detayı. İki seviyeyi birlikte fusion'a vermek conditioning kalitesini artırıyor.
+
+---
+
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — Seçenek 2: Padding mask loss masking UYGULANDP
+**Değişiklik:** `training_losses_seq2seq` içinde MSE loss yalnızca gerçek cevap token'larında hesaplanıyor:
+```python
+pad_id = getattr(_model_args, 'pad_token_id', 0)
+ans_len_mask = (input_ids_a != pad_id).float()  # [B, seq_len]
+ans_den = ans_len_mask.sum(dim=-1).clamp(min=1.0)
+mse_per_token = ((ans_emb - ans_output) ** 2).mean(dim=-1)
+terms["mse"] = (mse_per_token * ans_len_mask).sum(dim=-1) / ans_den
+```
+`t0_loss`, `decoder_nll`, `terms["nll"]` da aynı `ans_len_mask` ile maskeli.
+
+**Neden:** 100k analizinde model doğru medikal terimleri öğrenmişti ama 40+ token gürültü streamine gömmüştü — exact match 0. PAD pozisyonları MSE'ye dahil edilince model bu pozisyonlarda "bir şey üretmek" zorunda kalıyor. Maske ile PAD öğrenimi doğal — model SEP/PAD üretip durmayı öğreniyor. Yeniden eğitim gerektiriyor.
+
+---
+
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — `use_noising_f` bayrağı eklendi
+**Değişiklik:** `f = cond_x_start_mean if use_noising_f else None`. Default: `False`.
+
+**Neden:** `f` her zaman `cond_x_start_mean` (answer bilgisi içeriyor) olurken inference'ta bu bilgi yok → training/inference mismatch. `use_noising_f=False` ile training da inference gibi pure noise'tan başlıyor. `use_noising_f=True` ablasyon için saklandı.
+
+---
+
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — `pre_answer_loss` koşullu hale getirildi
+**Değişiklik:** `pre_answer_loss_weight=0.0` (config default) iken `pre_answer_loss = zeros` — hesaplama ve gradient yok. `> 0.0` iken padding mask ile ağırlıklı hesaplanıyor.
+
+**Neden:** Önceki `BUG 13` kararıyla pre_answer_loss tamamen kaldırılmıştı. Ablasyon için geri alındı ama güvenli default (0.0) ile. `0.05` ile fusion supervision etkisi test edilebilir.
+
+---
+
+### [KARAR] `diffuvqa/config.json` — Yeni bayraklar eklendi
+**Değişiklik:** `"use_noising_f": false, "pre_answer_loss_weight": 0.0` eklendi.
+
+**Neden:** Argümanlar `argparse` ile `train.py`'ye geçiliyor; `config.json` training_args.json olarak kaydediliyor. Inference sırasında `sample_vqa_GPU.py` bu dosyadan okuduğu için flagların burada da olması gerekiyor.
+
+---
+
+### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — 200k eğitim konfigürasyonu
+**Değişiklik:** Config hücresi:
+- `LEARNING_STEPS = 200000`, `SAVE_INTERVAL = 5000` (40 checkpoint toplam)
+- `RESUME_CHECKPOINT = None` (sıfırdan eğitim — yeni mimari önceki checkpoint'lerle uyumsuz)
+- `USE_NOISING_F = False`, `PRE_ANSWER_LOSS_WEIGHT = 0.0` eklendi
+
+Training hücresi: `--use_noising_f {USE_NOISING_F} --pre_answer_loss_weight {PRE_ANSWER_LOSS_WEIGHT}` argümanları eklendi.
+
+**Neden:** Padding mask loss masking + lm_head tying restore + use_noising_f=False üçlüsü birlikte yeniden eğitim gerektiriyor. 100k analizi ışığında 200k hedeflendi; her 5k'da checkpoint ile converging noktası takip edilebilir.
+
+---
+
 ### [KARAR] `eval/eval_DiffuVQA.py` — BERTScore `int too big to convert` hatası düzeltildi
 **Değişiklik:** `bert_score()` çağrısından önce tüm kandidat ve referans stringler 512 karaktere truncate ediliyor (`r[:512]`). `verbose=False` ayarlandı; çağrı `warnings.catch_warnings()` + `logging.disable(WARNING)` bloğuna alındı.
 
