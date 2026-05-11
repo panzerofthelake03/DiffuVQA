@@ -2,55 +2,6 @@
 
 Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
----
-
-## 2026-05-10
-
-### [KARAR] `sample_vqa_GPU.py` — Confidence threshold 0.3 → 0.1 düşürüldü
-**Değişiklik:** `conf_threshold = 0.3` → `conf_threshold = 0.1`
-
-**Neden:** PubMedBERT 95k checkpoint analizi (500 sample step, 1024 örnek): cevapların %59'u tamamen boştu. `0.3` eşiği trailing noise'u temizlemek yerine neredeyse tüm token'ları kesiyordu. `0.1`'de anlamlı token'lar korunurken aşırı gürültü hâlâ filtrelenir.
-
-**Bulgular (95k):** BLEU-1=0.017, exact match=%0.98, entity_overlap=0.885, clinical_similarity=0.693 — model medikal terimleri öğrenmiş ama henüz doğru bağlamı oturtamamış. 150k'da anlamlı iyileşme bekleniyor.
-
----
-
-### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — `copytree` veri kaybı düzeltildi
-**Değişiklik:** Clone hücresindeki `shutil.copytree(LOCAL_CLONE_PATH, DRIVE_PROJECT_PATH, dirs_exist_ok=True)` kaldırıldı. Yerine yalnızca kod dosyalarını kopyalayan SKIP_DIRS mekanizması eklendi: `datasets`, `checkpoints`, `samples`, `outputs`, `reports`, `.git` klasörleri atlanıyor.
-
-**Neden:** Git clone `datasets/` ve `checkpoints/` getirmiyor (`.gitignore`'da). `copytree` bu klasörleri Drive'da boş olarak yaratıyor, mevcut içeriği (checkpoint .pt dosyaları, SLAKE images) siliyordu.
-
-**Ayrıca:** Hücrenin başına `os.chdir("/content")` eklendi — cwd Drive içindeyken `rmtree(LOCAL_CLONE_PATH)` yapılınca `getcwd` crash veriyordu.
-
----
-
-### [KARAR] `sample_vqa_GPU.py` — SEP/PAD kesme + confidence threshold + MBR eklendi
-**Değişiklik:** Üretilen sequence post-processing pipeline'ı eklendi:
-
-**Seçenek 1 — SEP/PAD kesme:** Her üretilen sequence'te ilk `[SEP]` veya `[PAD]` token'ına kadar kes. Model seq_len kadar token üretmek zorunda olduğu için gereksiz trailing noise bu şekilde temizlenir.
-
-**Seçenek 3 — Confidence threshold:** SEP/PAD bulunamadıysa (model henüz bunu öğrenmemişse) trailing token'ları arasında confidence < 0.3 olanları sil. Gürültüyü kısmen temizler, yeniden eğitim gerektirmez.
-
-**Seçenek 4 — MBR (Minimum Bayes Risk):** `--num_samples N` ile N adet sample üretilip ortalama embedding'e L2 mesafesi en düşük olanı seç. N=1'de mevcut davranış korunur. N>1'de kalite artar, latency N katına çıkar — chatbot için N=1, offline eval için N=3-5 önerilir.
-
-**Neden:** JSONL analizi gösterdi ki doğru cevap token'ı örneklerin %29'unda üretilmiş ama 15-20 token'lık gürültü arasına gömülmüş. Exact match 0 ama contains %29. Bu post-processing pipeline exact match'i artırmayı hedefliyor.
-
-**Endişe:** SEP/PAD kesme, model bu token'ları üretmeyi öğrenmemişse etkisiz kalır. 150k checkpoint'te test edilmeli. Kalıcı çözüm Seçenek 2 (aşağıda).
-
----
-
-### [BEKLEYEN KARAR] Seçenek 2 — Training'de padding mask ile loss masking (Sonraki Run)
-**Değişiklik (henüz uygulanmadı):** `gaussian_diffusion.py` `training_losses` içinde MSE loss'u gerçek cevap uzunluğuyla maskele — padding token pozisyonlarına loss ağırlığı 0 ver:
-```python
-ans_len_mask = (token_ids != pad_id).float()  # [B, seq_len]
-terms["mse"] = mean_flat((ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1))
-```
-
-**Neden uygulanmadı:** Mevcut 150k run devam ediyor. Bu değişiklik yeniden eğitim gerektirir — mevcut checkpoint'lerle uyumsuz.
-
-**Ne zaman uygulanmalı:** 150k run tamamlanıp sonuçlar değerlendirildikten sonra, bir sonraki training run başlamadan önce uygulanmalı.
-
-**Beklenen etki:** Model kısa cevaplar için doğal olarak erken durur, SEP/PAD üretmeyi öğrenir. Post-processing pipeline'ına olan bağımlılık azalır.
 
 ---
 
@@ -81,7 +32,7 @@ terms["mse"] = mean_flat((ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1
 
 ---
 
-### [KARAR] `diffuvqa/gaussian_diffusion.py` — Seçenek 2: Padding mask loss masking UYGULANDP
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — Seçenek 2: Padding mask loss masking UYGULANDI
 **Değişiklik:** `training_losses_seq2seq` içinde MSE loss yalnızca gerçek cevap token'larında hesaplanıyor:
 ```python
 pad_id = getattr(_model_args, 'pad_token_id', 0)
@@ -163,6 +114,58 @@ Training hücresi: `--use_noising_f {USE_NOISING_F} --pre_answer_loss_weight {PR
 **Neden:** 50k checkpoint ile devam ediliyor.
 
 ---
+
+
+---
+
+## 2026-05-10
+
+### [KARAR] `sample_vqa_GPU.py` — Confidence threshold 0.3 → 0.1 düşürüldü
+**Değişiklik:** `conf_threshold = 0.3` → `conf_threshold = 0.1`
+
+**Neden:** PubMedBERT 95k checkpoint analizi (500 sample step, 1024 örnek): cevapların %59'u tamamen boştu. `0.3` eşiği trailing noise'u temizlemek yerine neredeyse tüm token'ları kesiyordu. `0.1`'de anlamlı token'lar korunurken aşırı gürültü hâlâ filtrelenir.
+
+**Bulgular (95k):** BLEU-1=0.017, exact match=%0.98, entity_overlap=0.885, clinical_similarity=0.693 — model medikal terimleri öğrenmiş ama henüz doğru bağlamı oturtamamış. 150k'da anlamlı iyileşme bekleniyor.
+
+---
+
+### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — `copytree` veri kaybı düzeltildi
+**Değişiklik:** Clone hücresindeki `shutil.copytree(LOCAL_CLONE_PATH, DRIVE_PROJECT_PATH, dirs_exist_ok=True)` kaldırıldı. Yerine yalnızca kod dosyalarını kopyalayan SKIP_DIRS mekanizması eklendi: `datasets`, `checkpoints`, `samples`, `outputs`, `reports`, `.git` klasörleri atlanıyor.
+
+**Neden:** Git clone `datasets/` ve `checkpoints/` getirmiyor (`.gitignore`'da). `copytree` bu klasörleri Drive'da boş olarak yaratıyor, mevcut içeriği (checkpoint .pt dosyaları, SLAKE images) siliyordu.
+
+**Ayrıca:** Hücrenin başına `os.chdir("/content")` eklendi — cwd Drive içindeyken `rmtree(LOCAL_CLONE_PATH)` yapılınca `getcwd` crash veriyordu.
+
+---
+
+### [KARAR] `sample_vqa_GPU.py` — SEP/PAD kesme + confidence threshold + MBR eklendi
+**Değişiklik:** Üretilen sequence post-processing pipeline'ı eklendi:
+
+**Seçenek 1 — SEP/PAD kesme:** Her üretilen sequence'te ilk `[SEP]` veya `[PAD]` token'ına kadar kes. Model seq_len kadar token üretmek zorunda olduğu için gereksiz trailing noise bu şekilde temizlenir.
+
+**Seçenek 3 — Confidence threshold:** SEP/PAD bulunamadıysa (model henüz bunu öğrenmemişse) trailing token'ları arasında confidence < 0.3 olanları sil. Gürültüyü kısmen temizler, yeniden eğitim gerektirmez.
+
+**Seçenek 4 — MBR (Minimum Bayes Risk):** `--num_samples N` ile N adet sample üretilip ortalama embedding'e L2 mesafesi en düşük olanı seç. N=1'de mevcut davranış korunur. N>1'de kalite artar, latency N katına çıkar — chatbot için N=1, offline eval için N=3-5 önerilir.
+
+**Neden:** JSONL analizi gösterdi ki doğru cevap token'ı örneklerin %29'unda üretilmiş ama 15-20 token'lık gürültü arasına gömülmüş. Exact match 0 ama contains %29. Bu post-processing pipeline exact match'i artırmayı hedefliyor.
+
+**Endişe:** SEP/PAD kesme, model bu token'ları üretmeyi öğrenmemişse etkisiz kalır. 150k checkpoint'te test edilmeli. Kalıcı çözüm Seçenek 2 (aşağıda).
+
+---
+
+### [BEKLEYEN KARAR] Seçenek 2 — Training'de padding mask ile loss masking (Sonraki Run)
+**Değişiklik (henüz uygulanmadı):** `gaussian_diffusion.py` `training_losses` içinde MSE loss'u gerçek cevap uzunluğuyla maskele — padding token pozisyonlarına loss ağırlığı 0 ver:
+```python
+ans_len_mask = (token_ids != pad_id).float()  # [B, seq_len]
+terms["mse"] = mean_flat((ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1))
+```
+
+**Neden uygulanmadı:** Mevcut 150k run devam ediyor. Bu değişiklik yeniden eğitim gerektirir — mevcut checkpoint'lerle uyumsuz.
+
+**Ne zaman uygulanmalı:** 150k run tamamlanıp sonuçlar değerlendirildikten sonra, bir sonraki training run başlamadan önce uygulanmalı.
+
+**Beklenen etki:** Model kısa cevaplar için doğal olarak erken durur, SEP/PAD üretmeyi öğrenir. Post-processing pipeline'ına olan bağımlılık azalır.
+
 
 ## 2026-05-09
 
