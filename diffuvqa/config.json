@@ -35,6 +35,8 @@
   "output_dims": 512,
   "total_answers_num": 557,
   "dropout": 0.2,
+  "use_noising_f": false,
+  "pre_answer_loss_weight": 0.0,
   "use_fp16": false,
   "fp16_scale_growth": 0.001,
   "seed": 102,

@@ -151,6 +151,7 @@ class feature_fusion(nn.Module):
         for layer in self.bert.encoder.layer:
             question_feats = layer(question_emb, extended_q_masks)[0]
         question_feats = self.question_feature_proj(question_feats)
+        question_emb_proj = self.question_feature_proj(question_emb)
 
         # == Image Encoding ==
         image_feats = self.vision_encoder(image)
@@ -196,6 +197,11 @@ class feature_fusion(nn.Module):
         # q_for_image: question features projected to target_len (already target_len)
         q_for_image = question_feats  # [B, target_len, H]
 
+        if question_emb_proj.size(1) != target_len:
+            question_emb_for_image = question_emb_proj.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
+        else:
+            question_emb_for_image = question_emb_proj
+
         # image_feats: pool to single vector then expand to target_len
         if image_feats.size(1) != target_len:
             image_feats = image_feats.mean(dim=1, keepdim=True).expand(-1, target_len, -1)
@@ -207,7 +213,7 @@ class feature_fusion(nn.Module):
         assert f4.size(1) == image_feats.size(1) == q_for_image.size(1) == target_len, \
             f"feature_fusion length mismatch: f4={f4.size(1)}, image={image_feats.size(1)}, q={q_for_image.size(1)}, target={target_len}"
 
-        f = self.alpha * f4 + self.beta * image_feats + self.theta * q_for_image
+        f = self.alpha * f4 + self.beta * image_feats + self.theta * (q_for_image + question_emb_for_image)
         return f, pre_simu_answer_feats
     
     def init_weights(self, module):
@@ -462,6 +468,13 @@ class TransformerNetModel(nn.Module):
                 self.fuse_output_proj.weight.data.normal_(mean=0.0, std=0.02)
                 if self.fuse_output_proj.bias is not None:
                     self.fuse_output_proj.bias.data.zero_()
+        except Exception:
+            pass
+
+        # Re-tie output projection to token embeddings when dimensions match.
+        try:
+            if self.lm_head.weight.shape == self.word_embedding.weight.shape:
+                self.lm_head.weight = self.word_embedding.weight
         except Exception:
             pass
 

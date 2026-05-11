@@ -6,6 +6,8 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ## 2026-05-11
 
+**Durum notu:** Bu başlıktaki değişiklikler Bio-Bert branch'inde kodda uygulanmış durumdadır.
+
 ### [KARAR] sample_vqa_GPU.py — Orta seviye token seçimi iyileştirmesi (Top-k rerank + minimum cevap uzunluğu)
 **Sorun:** Üretilen cevaplarda boş string oranı yüksekti. Bunun ana nedeni top-1 greedy seçim ve ilk tokenlarda SEP/PAD gelince erken kesme davranışıydı.
 

@@ -248,7 +248,9 @@ class GaussianDiffusion:
         :param mask: anchoring masked position
         :return: A noisy version of x_start.
         """
-        if noise is not None and add_information is not None:
+        if noise is not None and bool(add_information):
+            if f is None:
+                raise ValueError("q_sample received add_information=True but f is None")
 
             noise = (
                     _extract_into_tensor(self.sqrt_alphas_cumprod, t, f.shape) * f
@@ -637,6 +639,11 @@ class GaussianDiffusion:
         ddpm_input_pre, ans_emb_pre = real_model.get_ddpm_input(image, model_kwargs)
 
         ans_emb = real_model.get_embeds(input_ids_a)
+        ans_len_mask = (input_ids_a != 0).float()
+
+        use_noising_f = bool(getattr(getattr(real_model, 'args', None), 'use_noising_f', False))
+        pre_answer_loss_weight = float(getattr(getattr(real_model, 'args', None), 'pre_answer_loss_weight', 0.0))
+
         # x_start_mean = clean answer embedding — defines the target manifold for
         # diffusion. x_start is a noisy sample around this mean (reparametrization).
         # The model learns to map x_t → x_start_mean (the answer embedding).
@@ -655,15 +662,12 @@ class GaussianDiffusion:
         if noise is None:
             noise = th.randn_like(cond_x_start)
 
-        # f = clean mean [fuse | ans_emb] — fed into q_sample's add_information
-        # branch so the noise schedule mixes toward the answer manifold, not
-        # toward a noisy x_start. This keeps the learned reverse process anchored
-        # to the answer embedding space.
-        f = cond_x_start_mean
+        # Optional auxiliary noising branch mirrors inference-time behavior.
+        f = cond_x_start if use_noising_f else None
 
         # Sanity check shapes: q_sample expects x_start and f to have identical
         # shapes. If they differ, print detailed diagnostics and raise.
-        if cond_x_start.shape != f.shape:
+        if use_noising_f and cond_x_start.shape != f.shape:
             print(f"SHAPE MISMATCH before q_sample: cond_x_start={tuple(cond_x_start.shape)}, f={tuple(f.shape)}, ddpm_input_pre={tuple(ddpm_input_pre.shape)}, x_start={tuple(x_start.shape)}, x_start_mean={tuple(x_start_mean.shape)}", flush=True)
             raise RuntimeError("cond_x_start and f have different shapes before q_sample")
 
@@ -685,7 +689,7 @@ class GaussianDiffusion:
                 mask_to_use = mask[:, :cond_x_start.shape[1]]
 
         x_t = self.q_sample(cond_x_start, f, t, noise=noise, mask=mask_to_use.to(x_start.device),
-                            add_information=True)  # reparametrization trick.
+                    add_information=use_noising_f)  # reparametrization trick.
 
         get_logits = real_model.get_logits
 
@@ -699,7 +703,9 @@ class GaussianDiffusion:
 
         assert model_output.shape == cond_x_start.shape
         ans_output = model_output[:, fuse_len:, :]
-        terms["mse"] = mean_flat((ans_emb - ans_output) ** 2)
+        mse_per_token = ((ans_emb - ans_output) ** 2).mean(dim=-1)
+        mse_den = ans_len_mask.sum(dim=-1).clamp(min=1.0)
+        terms["mse"] = (mse_per_token * ans_len_mask).sum(dim=-1) / mse_den
         # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
         # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
@@ -710,7 +716,8 @@ class GaussianDiffusion:
 
         t0_mask = (t == 0)
         # At t=0 the model should perfectly predict the answer embedding
-        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2)
+        t0_per_token = ((x_start_mean - model_out_x_start) ** 2).mean(dim=-1)
+        t0_loss = (t0_per_token * ans_len_mask).sum(dim=-1) / mse_den
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
 
         # tT_loss: at the last timestep pure noise should have near-zero mean
@@ -718,11 +725,22 @@ class GaussianDiffusion:
         tT_loss = mean_flat(out_mean ** 2)
 
         # decoder_nll: regularize predicted answer embeddings toward vocabulary tokens
-        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a)
-        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a)
-        # assert (model.lm_head.weight == model.word_embedding.weight).all()
+        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a, mask=ans_len_mask)
+        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a, mask=ans_len_mask)
 
-        terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll
+        if pre_answer_loss_weight > 0:
+            pre_answer_len = min(ans_emb_pre.size(1), x_start_mean.size(1))
+            aligned_ans_emb_pre = ans_emb_pre[:, :pre_answer_len, :]
+            aligned_ans_emb = x_start_mean[:, :pre_answer_len, :]
+            aligned_ans_mask = ans_len_mask[:, :pre_answer_len]
+            pre_answer_per_token = ((aligned_ans_emb_pre - aligned_ans_emb) ** 2).mean(dim=-1)
+            pre_answer_den = aligned_ans_mask.sum(dim=-1).clamp(min=1.0)
+            pre_answer_loss = (pre_answer_per_token * aligned_ans_mask).sum(dim=-1) / pre_answer_den
+            pre_answer_loss = pre_answer_loss_weight * pre_answer_loss
+        else:
+            pre_answer_loss = th.zeros_like(terms["mse"])
+
+        terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll + pre_answer_loss
 
         return terms
 
