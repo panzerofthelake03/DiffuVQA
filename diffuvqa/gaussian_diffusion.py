@@ -612,6 +612,8 @@ class GaussianDiffusion:
         assert 'input_ids' in model_kwargs
         _ = model_kwargs.pop('input_ids').to(t.device)
         input_ids_a = model_kwargs['input_a_id'].to(t.device)
+        pad_id = 0
+        ans_len_mask = (input_ids_a != pad_id).float()
         # x_start_arr = model.model.module.get_embeds(input_ids_x)
         _ = model_kwargs.pop('input_mask').to(t.device)
 
@@ -720,7 +722,9 @@ class GaussianDiffusion:
             raise RuntimeError(f"Unexpected sizes: target_len={target_len} > total_len={total_len}")
         start_idx = total_len - target_len
         model_output_answer = model_output[:, start_idx:, :]
-        terms["mse"] = mean_flat((x_start_mean - model_output_answer) ** 2)
+        mse_per_token = ((x_start_mean - model_output_answer) ** 2).mean(dim=-1)
+        mse_den = ans_len_mask.sum(dim=-1).clamp(min=1.0)
+        terms["mse"] = (mse_per_token * ans_len_mask).sum(dim=-1) / mse_den
         # terms["x_mse"] = mean_flat((x_start - model_output[:, model_output.size(1)//2:, :]) ** 2)
         # terms["cond_mse"] = mean_flat(((ddpm_input_pre - model_output[:, :model_output.size(1)//2, :]) ** 2))
 
@@ -734,7 +738,9 @@ class GaussianDiffusion:
         cond_model_out_x_start = self._x0_helper(model_output, x_t, t)['pred_xstart']
         model_out_x_start = cond_model_out_x_start[:, start_idx:, :]
         t0_mask = (t == 0)
-        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2)
+        t0_per_token = ((x_start_mean - model_out_x_start) ** 2).mean(dim=-1)
+        t0_den = ans_len_mask.sum(dim=-1).clamp(min=1.0)
+        t0_loss = (t0_per_token * ans_len_mask).sum(dim=-1) / t0_den
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
         # terms["mse"] = terms["x_mse"] + terms["cond_mse"]
         # tT_mask = (t == self.num_timesteps - 1)
@@ -744,7 +750,7 @@ class GaussianDiffusion:
         )
         tT_loss = mean_flat(out_mean ** 2)
 
-        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a)
+        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a, mask=ans_len_mask)
 
         # The model predicts the concatenated conditional+target sequence. Extract
         # the predicted target portion using the target sequence length rather
@@ -762,7 +768,7 @@ class GaussianDiffusion:
         except Exception:
             pass
         model_out_x_start = cond_model_out_x_start[:, start_idx:, :]
-        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a)  # x_0->model_out_x_start
+        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a, mask=ans_len_mask)  # x_0->model_out_x_start
         # assert (model.lm_head.weight == model.word_embedding.weight).all()
 
         terms["loss"] = terms["mse"] + tT_loss + pre_answer_loss + terms["nll"] + decoder_nll
