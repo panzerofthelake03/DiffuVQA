@@ -65,6 +65,25 @@ terms["mse"] = mean_flat((ans_emb - ans_output) ** 2 * ans_len_mask.unsqueeze(-1
 
 ---
 
+### [KARAR] `sample_vqa_GPU.py` — Top-k rerank + minimum cevap uzunluğu iyileştirmesi
+**Değişiklik:** Yeni argümanlar eklendi: `--decode_top_k` (default: 5), `--min_answer_tokens` (default: 2), `--short_answer_penalty` (default: 1.0).
+
+**Mekanizma:**
+- `topk(logits, k=decode_top_k)` ile her pozisyon için k aday token toplanıyor.
+- Her batch örneği için k farklı aday sequence oluşturulup rerank ediliyor.
+- SEP/PAD kesme yalnızca `min_answer_tokens` sonrasında geçerli — erken boş cevap engelleniyor.
+- Confidence filtresi (`0.1`) `min_answer_tokens` sonrasında uygulanıyor.
+- Her aday için `avg_log_prob - short_answer_penalty` skoru hesaplanıyor; en yüksek skorlu aday seçiliyor.
+- `short_answer_penalty`: efektif uzunluk `< min_answer_tokens` ise uygulanır.
+
+**Neden:** Yeniden eğitim gerektirmeden boş cevap oranını düşüren en dengeli yol. Top-1 greedy seçimde ilk tokenda gelen SEP/PAD tüm cevabı boşaltıyordu.
+
+**İzleme sweep önerisi:** `(decode_top_k=5, min_answer_tokens=2, conf=0.25, penalty=1.0)`, `(5, 2, 0.20, 1.0)`, `(7, 2, 0.20, 0.8)`
+
+**Risk:** `decode_top_k` arttıkça CPU-side aday değerlendirme maliyeti artar. `short_answer_penalty` fazla yüksek olursa doğru kısa cevaplar ("no", "2") gereksiz cezalanabilir.
+
+---
+
 ### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — `RESUME_CHECKPOINT` 50k güncellendi
 **Değişiklik:** `ema_0.9999_045000.pt` → `ema_0.9999_050000.pt`
 

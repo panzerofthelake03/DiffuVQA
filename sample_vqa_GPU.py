@@ -60,7 +60,8 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 
 def create_argparser():
     defaults = dict(model_path='', step=2500, out_dir='', top_p=0)
-    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False, num_samples=1)
+    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False, num_samples=1,
+                           decode_top_k=5, min_answer_tokens=2, short_answer_penalty=1.0)
     defaults.update(load_defaults_config())
     defaults.update(decode_defaults)
     parser = argparse.ArgumentParser()
@@ -338,12 +339,15 @@ def main():
 
         sample = sample[:, fuse_len:fuse_len + answer_len, :]
         logits = model.get_logits(sample)
-        cands = th.topk(logits, k=1, dim=-1)
+
+        decode_top_k = max(1, getattr(args, 'decode_top_k', 5))
+        cands = th.topk(logits, k=decode_top_k, dim=-1)  # [B, seq_len, k]
 
         probs = th.softmax(logits, dim=-1)
-        chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
-        seq_confidence = chosen_probs.mean(dim=1)
-        seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
+        # chosen_probs: probability of each top-k candidate at each position [B, seq_len, k]
+        chosen_probs = probs.gather(-1, cands.indices)
+        seq_confidence = chosen_probs[:, :, 0].mean(dim=1)  # top-1 confidence per sequence
+        seq_logprob = th.log(chosen_probs[:, :, 0].clamp(min=1e-12)).sum(dim=1)
 
         try:
             sample_flat = sample.contiguous().view(-1, sample.size(-1))
@@ -360,29 +364,58 @@ def main():
         sep_id = tokenizer.tokenizer.sep_token_id if hasattr(tokenizer, 'tokenizer') else tokenizer.sep_token_id
         pad_id = tokenizer.tokenizer.pad_token_id if hasattr(tokenizer, 'tokenizer') else tokenizer.pad_token_id
 
-        for seq, prob_seq in zip(cands.indices.squeeze(-1), chosen_probs):
-            seq = seq.to(th.device("cpu"))
-            prob_seq = prob_seq.to(th.device("cpu"))
+        min_answer_tokens = max(1, getattr(args, 'min_answer_tokens', 2))
+        short_answer_penalty = getattr(args, 'short_answer_penalty', 1.0)
+        conf_threshold = 0.1
+        stop_ids = set(filter(None, [sep_id, pad_id]))
 
-            # Seçenek 1: [SEP] veya [PAD] tokenına kadar kes
-            token_list = seq.tolist()
-            stop_ids = set(filter(None, [sep_id, pad_id]))
-            cut = next((i for i, t in enumerate(token_list) if t in stop_ids), len(token_list))
-            seq = seq[:cut] if cut > 0 else seq
+        # cands.indices: [B, seq_len, k], chosen_probs: [B, seq_len, k]
+        for b_idx in range(cands.indices.size(0)):
+            top_k_ids = cands.indices[b_idx].cpu()    # [seq_len, k]
+            top_k_probs = chosen_probs[b_idx].cpu()   # [seq_len, k]
 
-            # Seçenek 3: confidence < threshold olan tokenları kes (trailing noise)
-            conf_threshold = 0.1
-            if cut == len(token_list):
-                # SEP/PAD bulunamadıysa trailing low-confidence tokenları sil
-                prob_list = prob_seq[:len(seq)].tolist()
-                last_confident = len(prob_list)
-                for j in range(len(prob_list) - 1, -1, -1):
-                    if prob_list[j] >= conf_threshold:
-                        last_confident = j + 1
+            best_seq = None
+            best_score = float('-inf')
+
+            for k_i in range(decode_top_k):
+                seq = top_k_ids[:, k_i]        # [seq_len]
+                prob_seq = top_k_probs[:, k_i]  # [seq_len]
+                token_list = seq.tolist()
+
+                # Seçenek 1: SEP/PAD kesme — min_answer_tokens öncesinde bastır
+                cut = len(token_list)
+                for i, t in enumerate(token_list):
+                    if t in stop_ids and i >= min_answer_tokens:
+                        cut = i
                         break
-                seq = seq[:last_confident] if last_confident > 0 else seq[:1]
 
-            tokens = tokenizer.decode_token(seq)
+                seq = seq[:cut] if cut > 0 else seq[:1]
+                prob_seq_cut = prob_seq[:len(seq)]
+
+                # Seçenek 3: trailing low-confidence temizleme (SEP/PAD bulunamadıysa)
+                if cut == len(token_list):
+                    prob_list = prob_seq_cut.tolist()
+                    last_confident = len(prob_list)
+                    for j in range(len(prob_list) - 1, -1, -1):
+                        if prob_list[j] >= conf_threshold:
+                            last_confident = j + 1
+                            break
+                    seq = seq[:last_confident] if last_confident > 0 else seq[:1]
+                    prob_seq_cut = prob_seq[:len(seq)]
+
+                eff_len = len(seq)
+                log_prob_sum = th.log(prob_seq_cut.clamp(min=1e-12)).sum().item()
+                avg_log_prob = log_prob_sum / max(eff_len, 1)
+
+                # Kısa cevap cezası
+                penalty = short_answer_penalty if eff_len < min_answer_tokens else 0.0
+                score = avg_log_prob - penalty
+
+                if score > best_score:
+                    best_score = score
+                    best_seq = seq
+
+            tokens = tokenizer.decode_token(best_seq)
             word_lst_recover.append(tokens)
 
         for seq, input_mask in zip(input_ids_x, input_ids_mask_ori):
