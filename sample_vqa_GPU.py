@@ -362,7 +362,8 @@ def main():
             chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
             seq_confidence = chosen_probs.mean(dim=1)
             seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
-
+            #TODO: consider more sophisticated confidence metrics that account for sequence length and token-level variance, rather than just mean token prob.
+            #TODO: consider LLM based relevance checking as an additional confidence/rationale metric.
             # Mask low-confidence positions to PAD before decoding.
             conf_threshold = float(getattr(args, 'confidence_threshold', 0.3))
             pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
