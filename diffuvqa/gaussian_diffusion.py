@@ -571,7 +571,9 @@ class GaussianDiffusion:
             decoder_nll *= mask
         # print(decoder_nll.shape)
         if mask != None:
-            decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1)
+            mask_sum = mask.sum(dim=-1)
+            decoder_nll = decoder_nll.sum(dim=-1) / mask_sum.clamp(min=1.0)
+            decoder_nll = th.where(mask_sum > 0, decoder_nll, th.zeros_like(decoder_nll))
         else:
             decoder_nll = decoder_nll.mean(dim=-1)
 
