@@ -570,7 +570,7 @@ class GaussianDiffusion:
             decoder_nll *= mask
         # print(decoder_nll.shape)
         if mask != None:
-            decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1)
+            decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1).clamp(min=1.0)
         else:
             decoder_nll = decoder_nll.mean(dim=-1)
 
@@ -705,7 +705,7 @@ class GaussianDiffusion:
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
 
         out_mean, _, _ = self.q_mean_variance(x_start_mean, th.LongTensor([self.num_timesteps - 1]).to(x_start_mean.device))
-        tT_loss = mean_flat(out_mean ** 2)
+        tT_loss = mean_flat(out_mean ** 2).clamp(max=100.0)
 
         decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a, mask=ans_len_mask)
         terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a, mask=ans_len_mask)
@@ -722,6 +722,8 @@ class GaussianDiffusion:
             pre_answer_loss = th.zeros_like(terms["mse"])
 
         terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll + pre_answer_loss
+        # Guard: replace any remaining NaN/Inf with 0 so training doesn't collapse.
+        terms["loss"] = th.nan_to_num(terms["loss"], nan=0.0, posinf=100.0, neginf=0.0)
 
         return terms
 
