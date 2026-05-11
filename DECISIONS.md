@@ -4,6 +4,49 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+## 2026-05-11
+
+### [KARAR] sample_vqa_GPU.py — Orta seviye token seçimi iyileştirmesi (Top-k rerank + minimum cevap uzunluğu)
+**Sorun:** Üretilen cevaplarda boş string oranı yüksekti. Bunun ana nedeni top-1 greedy seçim ve ilk tokenlarda SEP/PAD gelince erken kesme davranışıydı.
+
+**Uygulanan değişiklikler:**
+- Decode tarafına yeni argümanlar eklendi:
+    - `decode_top_k` (default: 5)
+    - `min_answer_tokens` (default: 2)
+    - `short_answer_penalty` (default: 1.0)
+- `topk(logits, k=1)` yerine `topk(logits, k=decode_top_k)` ile adaylar toplandı.
+- Her örnek için k adet aday cevap oluşturulup rerank edildi.
+- `min_answer_tokens` pozisyonundan önce SEP/PAD adayları bastırıldı (erken boş cevap engeli).
+- Confidence filtresi `min_answer_tokens` sonrasında uygulandı; düşük güven tokenlar PAD yapıldı.
+- Aday skorlamasına kısa cevap cezası eklendi:
+    - efektif uzunluk `< min_answer_tokens` ise ceza uygulanıyor.
+- Decode kesme kuralı güncellendi:
+    - SEP/PAD kesmesi sadece `min_answer_tokens` sonrasında geçerli.
+
+**Neden bu çözüm seçildi:**
+- Yeniden eğitim gerektirmeden inference kalitesini iyileştiren en dengeli yol.
+- Küçük değişimden daha güçlü, LLM-rerank çözümünden daha hızlı ve operasyonel olarak ucuz.
+
+**Beklenen etki:**
+- Boş cevap oranında belirgin düşüş.
+- Aşırı kısa/tek token cevaplarda azalma.
+- Ortalama cevap tutarlılığında artış (özellikle yes/no ve kısa span sorularında).
+
+**Risk/Trade-off:**
+- `decode_top_k` arttıkça inference maliyeti (CPU-side aday değerlendirme) artar.
+- `short_answer_penalty` fazla yüksek olursa bazı doğru kısa cevaplar (örn. "no", "2") gereksiz cezalanabilir.
+
+**İzleme önerisi:**
+- Aynı checkpoint için şu sweep önerilir:
+    - `(decode_top_k, min_answer_tokens, confidence_threshold, short_answer_penalty)` =
+    - `(5, 2, 0.25, 1.0)`, `(5, 2, 0.20, 1.0)`, `(7, 2, 0.20, 0.8)`
+- Rapor metrikleri:
+    - empty-answer rate
+    - exact match
+    - contains-match
+
+---
+
 ## 2026-05-10
 
 ### [BUGFIX] sample_vqa_GPU.py — `decode_token()` tensor type hatasının düzeltilmesi

@@ -60,7 +60,16 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 
 def create_argparser():
     defaults = dict(model_path='', step=2500, out_dir='', top_p=0)
-    decode_defaults = dict(split='test', clamp_step=0, seed2=105, clip_denoised=False, confidence_threshold=0.3)
+    decode_defaults = dict(
+        split='test',
+        clamp_step=0,
+        seed2=105,
+        clip_denoised=False,
+        confidence_threshold=0.3,
+        decode_top_k=5,
+        min_answer_tokens=2,
+        short_answer_penalty=1.0,
+    )
     defaults.update(load_defaults_config())
     defaults.update(decode_defaults)
     parser = argparse.ArgumentParser()
@@ -323,21 +332,91 @@ def main():
         sample = sample[:, fuse_len:fuse_len + answer_len, :]
     # sample shape suppressed
         logits = model.get_logits(sample)
-        cands = th.topk(logits, k=1, dim=-1)
-
         probs = th.softmax(logits, dim=-1)
-        max_probs = probs.max(dim=-1).values
-        chosen_probs = probs.gather(-1, cands.indices).squeeze(-1)
-        seq_confidence = chosen_probs.mean(dim=1)
-        seq_logprob = th.log(chosen_probs.clamp(min=1e-12)).sum(dim=1)
-        #TODO: consider more sophisticated confidence metrics that account for sequence length and token-level variance, rather than just mean token prob.
-        #TODO: consider LLM based relevance checking as an additional confidence/rationale metric.
-        # Confidence-based token filtering before decoding.
+
+        top_k = int(getattr(args, 'decode_top_k', 5))
+        top_k = max(1, min(top_k, logits.size(-1)))
+        cands = th.topk(logits, k=top_k, dim=-1)
+
+        topk_ids = cands.indices.detach().cpu()         # [B, L, K]
+        topk_logits = cands.values.detach().cpu()       # [B, L, K]
+        topk_probs = probs.gather(-1, cands.indices).detach().cpu()  # [B, L, K]
+
         conf_threshold = float(getattr(args, 'confidence_threshold', 0.1))
+        min_answer_tokens = int(getattr(args, 'min_answer_tokens', 2))
+        short_answer_penalty = float(getattr(args, 'short_answer_penalty', 1.0))
         pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         sep_id = tokenizer.sep_token_id
-        token_ids = cands.indices.squeeze(-1).clone()
-        token_ids = token_ids.masked_fill(max_probs < conf_threshold, pad_id)
+        stop_ids = {pad_id}
+        if sep_id is not None:
+            stop_ids.add(sep_id)
+
+        batch_size = topk_ids.size(0)
+        token_ids = th.full((batch_size, topk_ids.size(1)), pad_id, dtype=th.long)
+        seq_confidence = th.zeros(batch_size, dtype=th.float32)
+        seq_logprob = th.zeros(batch_size, dtype=th.float32)
+
+        # Build K sequence candidates per sample and rerank with a short-answer penalty.
+        for b in range(batch_size):
+            best_score = None
+            best_seq = None
+            best_conf = 0.0
+            best_logp = 0.0
+
+            for k in range(top_k):
+                cand_ids = topk_ids[b, :, k].clone()
+                cand_probs = topk_probs[b, :, k].clone()
+                cand_logits = topk_logits[b, :, k].clone()
+
+                # Avoid premature stop: ignore stop tokens before min_answer_tokens.
+                for pos in range(min_answer_tokens):
+                    if pos < cand_ids.size(0) and int(cand_ids[pos].item()) in stop_ids:
+                        cand_ids[pos] = topk_ids[b, pos, 0]
+                        cand_probs[pos] = topk_probs[b, pos, 0]
+                        cand_logits[pos] = topk_logits[b, pos, 0]
+
+                # Confidence filtering after minimum token count.
+                for pos in range(min_answer_tokens, cand_ids.size(0)):
+                    if float(cand_probs[pos].item()) < conf_threshold:
+                        cand_ids[pos] = pad_id
+                        cand_probs[pos] = 0.0
+                        cand_logits[pos] = -1e9
+
+                cut = cand_ids.size(0)
+                for pos in range(cand_ids.size(0)):
+                    if pos >= min_answer_tokens and int(cand_ids[pos].item()) in stop_ids:
+                        cut = pos
+                        break
+
+                effective_len = max(0, cut)
+                if effective_len > 0:
+                    mean_prob = float(cand_probs[:effective_len].mean().item())
+                    sum_logp = float(th.log(cand_probs[:effective_len].clamp(min=1e-12)).sum().item())
+                    score = float(cand_logits[:effective_len].mean().item())
+                else:
+                    mean_prob = 0.0
+                    sum_logp = -1e9
+                    score = -1e9
+
+                if effective_len < min_answer_tokens:
+                    score -= short_answer_penalty * (min_answer_tokens - effective_len)
+
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_seq = cand_ids
+                    best_conf = mean_prob
+                    best_logp = sum_logp
+
+            token_ids[b] = best_seq
+            seq_confidence[b] = best_conf
+            seq_logprob[b] = best_logp
+
+        token_ids = token_ids.to(sample.device)
+        seq_confidence = seq_confidence.to(sample.device)
+        seq_logprob = seq_logprob.to(sample.device)
+
+        #TODO: consider more sophisticated confidence metrics that account for sequence length and token-level variance, rather than just mean token prob.
+        #TODO: consider LLM based relevance checking as an additional confidence/rationale metric.
 
         try:
             sample_flat = sample.contiguous().view(-1, sample.size(-1))
@@ -353,13 +432,12 @@ def main():
 
     # debug tensor printing removed to avoid huge outputs that clutter/overwrite
     # the terminal during long runs.
-        stop_ids = {pad_id}
-        if sep_id is not None:
-            stop_ids.add(sep_id)
         for seq_ids in token_ids:
             seq_ids = seq_ids.to(th.device("cpu"))
             seq_list = seq_ids.tolist()
-            first_stop = next((i for i, t in enumerate(seq_list) if t in stop_ids), len(seq_list))
+            first_stop = next((i for i, t in enumerate(seq_list) if i >= min_answer_tokens and t in stop_ids), len(seq_list))
+            if first_stop == 0 and len(seq_list) > 0:
+                first_stop = min_answer_tokens
             seq_cut = seq_ids[:first_stop]
             tokens = tokenizer.decode_token(seq_cut)
             word_lst_recover.append(tokens)
