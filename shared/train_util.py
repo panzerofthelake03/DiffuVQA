@@ -115,13 +115,15 @@ class TrainLoop:
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         if main_checkpoint in (None, '', 'none', 'None'):
             return
-        if main_checkpoint and bf.exists(main_checkpoint):
+        if main_checkpoint and os.path.exists(main_checkpoint):
             self.resume_step = parse_resume_step_from_filename(main_checkpoint)
             logger.log(f"Loading model from checkpoint: {main_checkpoint} (step {self.resume_step})")
             state_dict = dist_util.load_state_dict(
                 actual_model_path(main_checkpoint), map_location=dist_util.dev()
             )
             self.model.load_state_dict(state_dict, strict=False)
+        elif main_checkpoint:
+            logger.log(f"WARNING: resume_checkpoint not found at {main_checkpoint} — starting from scratch")
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.master_params)
@@ -144,11 +146,11 @@ class TrainLoop:
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         if main_checkpoint in (None, '', 'none', 'None'):
             return
-        opt_checkpoint = bf.join(
-            bf.dirname(main_checkpoint),
+        opt_checkpoint = os.path.join(
+            os.path.dirname(main_checkpoint),
             f"opt{self.resume_step:06d}.pt"
         )
-        if bf.exists(opt_checkpoint):
+        if os.path.exists(opt_checkpoint):
             logger.log(f"Loading optimizer state from: {opt_checkpoint}")
             state_dict = dist_util.load_state_dict(
                 actual_model_path(opt_checkpoint), map_location=dist_util.dev()
@@ -488,8 +490,8 @@ def find_ema_checkpoint(main_checkpoint, step, rate):
     if main_checkpoint is None:
         return None
     filename = f"ema_{rate}_{(step):06d}.pt"
-    path = bf.join(bf.dirname(main_checkpoint), filename)
-    if bf.exists(path):
+    path = os.path.join(os.path.dirname(main_checkpoint), filename)
+    if os.path.exists(path):
         return path
     return None
 
