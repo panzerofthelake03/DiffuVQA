@@ -363,7 +363,7 @@ class TransformerNetModel(nn.Module):
             # Temporarily unset HF_ENDPOINT to ensure download from official Hugging Face
             hf_endpoint = os.environ.pop('HF_ENDPOINT', None)
             try:
-                temp_bert = BertModel.from_pretrained('NeuML/pubmedbert-base-embeddings', config=config)
+                temp_bert = BertModel.from_pretrained('microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract', config=config)
             finally:
                 if hf_endpoint is not None:
                     os.environ['HF_ENDPOINT'] = hf_endpoint

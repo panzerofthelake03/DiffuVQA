@@ -29,7 +29,7 @@ class myTokenizer():
             # Temporarily unset HF_ENDPOINT to ensure download from official Hugging Face
             hf_endpoint = os.environ.pop('HF_ENDPOINT', None)
             try:
-                tokenizer = AutoTokenizer.from_pretrained("NeuML/pubmedbert-base-embeddings")
+                tokenizer = AutoTokenizer.from_pretrained("microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract")
             finally:
                 if hf_endpoint is not None:
                     os.environ['HF_ENDPOINT'] = hf_endpoint
@@ -169,7 +169,7 @@ def create_model_and_diffusion(args):
             else:
                 _plm = 'bert'
         if _plm == 'pubmedbert':
-            _config_name = 'NeuML/pubmedbert-base-embeddings'
+            _config_name = 'microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract'
         else:
             _config_name = 'bert-base-uncased'
             _plm = 'bert'
