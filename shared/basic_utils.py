@@ -16,8 +16,6 @@ class myTokenizer():
     ### You can custome your own tokenizer here. ###
     ################################################
     def __init__(self, args):
-        # hf-mirror does not always serve model weights; bypass it for model downloads
-        _hf_endpoint = os.environ.pop("HF_ENDPOINT", None)
         if args.vocab == 'bert':
             tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
             self.tokenizer = tokenizer
@@ -66,8 +64,6 @@ class myTokenizer():
                 with open(path_save_vocab, 'w') as f:
                     json.dump(vocab_dict, f)
                 
-        if _hf_endpoint:
-            os.environ["HF_ENDPOINT"] = _hf_endpoint
         self.vocab_size = len(self.tokenizer)
         args.vocab_size = self.vocab_size # update vocab size in args
     

@@ -300,11 +300,7 @@ class TransformerNetModel(nn.Module):
                 attention_probs_dropout_prob=args.dropout,
             )
 
-            import os as _os
-            _hf_endpoint = _os.environ.pop("HF_ENDPOINT", None)
             temp_bert = BertModel.from_pretrained(config_name, config=config)
-            if _hf_endpoint:
-                _os.environ["HF_ENDPOINT"] = _hf_endpoint
 
             self.word_embedding = temp_bert.embeddings.word_embeddings
             # If the pretrained token embeddings size differs from the
