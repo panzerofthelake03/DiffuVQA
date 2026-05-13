@@ -121,7 +121,17 @@ class TrainLoop:
             state_dict = dist_util.load_state_dict(
                 actual_model_path(main_checkpoint), map_location=dist_util.dev()
             )
-            self.model.load_state_dict(state_dict, strict=False)
+            # Filter out keys whose shape doesn't match the current model.
+            # This handles vocab size changes between checkpoints (e.g. NeuML→BiomedBERT).
+            model_state = self.model.state_dict()
+            filtered = {
+                k: v for k, v in state_dict.items()
+                if k in model_state and v.shape == model_state[k].shape
+            }
+            skipped = [k for k in state_dict if k not in filtered]
+            if skipped:
+                logger.log(f"Skipping {len(skipped)} mismatched keys: {skipped}")
+            self.model.load_state_dict(filtered, strict=False)
         elif main_checkpoint:
             logger.log(f"WARNING: resume_checkpoint not found at {main_checkpoint} — starting from scratch")
 
