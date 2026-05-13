@@ -26,7 +26,13 @@ class myTokenizer():
             print('save tokenizer to', args.checkpoint_path)
         elif args.vocab == 'pubmedbert':
             # Use PubMedBERT tokenizer for medical domain
-            tokenizer = AutoTokenizer.from_pretrained("NeuML/pubmedbert-base-embeddings")
+            # Temporarily unset HF_ENDPOINT to ensure download from official Hugging Face
+            hf_endpoint = os.environ.pop('HF_ENDPOINT', None)
+            try:
+                tokenizer = AutoTokenizer.from_pretrained("NeuML/pubmedbert-base-embeddings")
+            finally:
+                if hf_endpoint is not None:
+                    os.environ['HF_ENDPOINT'] = hf_endpoint
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id

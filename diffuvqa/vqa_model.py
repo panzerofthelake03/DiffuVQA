@@ -8,6 +8,7 @@ import torch
 import numpy as np
 import torch as th
 import torch.nn as nn
+import os
 import torch.nn.functional as F
 from torchvision import models
 import math
@@ -359,7 +360,13 @@ class TransformerNetModel(nn.Module):
             )
 
             # Load PubMedBERT model trained on medical literature
-            temp_bert = BertModel.from_pretrained('NeuML/pubmedbert-base-embeddings', config=config)
+            # Temporarily unset HF_ENDPOINT to ensure download from official Hugging Face
+            hf_endpoint = os.environ.pop('HF_ENDPOINT', None)
+            try:
+                temp_bert = BertModel.from_pretrained('NeuML/pubmedbert-base-embeddings', config=config)
+            finally:
+                if hf_endpoint is not None:
+                    os.environ['HF_ENDPOINT'] = hf_endpoint
 
             self.word_embedding = temp_bert.embeddings.word_embeddings
             # If the pretrained token embeddings size differs from the
