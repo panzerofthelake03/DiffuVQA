@@ -359,7 +359,7 @@ class TransformerNetModel(nn.Module):
             )
 
             # Load PubMedBERT model trained on medical literature
-            temp_bert = BertModel.from_pretrained('microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract', config=config)
+            temp_bert = BertModel.from_pretrained('NeuML/pubmedbert-base-embeddings', config=config)
 
             self.word_embedding = temp_bert.embeddings.word_embeddings
             # If the pretrained token embeddings size differs from the

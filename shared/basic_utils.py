@@ -26,7 +26,7 @@ class myTokenizer():
             print('save tokenizer to', args.checkpoint_path)
         elif args.vocab == 'pubmedbert':
             # Use PubMedBERT tokenizer for medical domain
-            tokenizer = AutoTokenizer.from_pretrained("microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract")
+            tokenizer = AutoTokenizer.from_pretrained("NeuML/pubmedbert-base-embeddings")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
@@ -34,7 +34,7 @@ class myTokenizer():
             tokenizer.save_pretrained(args.checkpoint_path)
             print('save PubMedBERT tokenizer to', args.checkpoint_path)
         elif args.vocab == 'bio-bert':
-            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.1")
+            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
@@ -163,7 +163,7 @@ def create_model_and_diffusion(args):
             else:
                 _plm = 'bert'
         if _plm == 'pubmedbert':
-            _config_name = 'microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract'
+            _config_name = 'NeuML/pubmedbert-base-embeddings'
         else:
             _config_name = 'bert-base-uncased'
             _plm = 'bert'
