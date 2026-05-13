@@ -26,7 +26,7 @@ class myTokenizer():
             print('save tokenizer to', args.checkpoint_path)
         elif args.vocab == 'pubmedbert':
             # Use PubMedBERT tokenizer for medical domain
-            tokenizer = AutoTokenizer.from_pretrained("microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract")
+            tokenizer = AutoTokenizer.from_pretrained("microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
@@ -163,7 +163,7 @@ def create_model_and_diffusion(args):
             else:
                 _plm = 'bert'
         if _plm == 'pubmedbert':
-            _config_name = 'microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract'
+            _config_name = 'microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract'
         else:
             _config_name = 'bert-base-uncased'
             _plm = 'bert'
