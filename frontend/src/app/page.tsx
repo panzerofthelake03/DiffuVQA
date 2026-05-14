@@ -175,6 +175,7 @@ export default function Page() {
       isTyping: true,
     };
 
+    const fileForFetch = selectedFile;
     const messageToSend = inputValue;
 
     setMessages((prev) => [...prev, userMessage, typingMessage]);
@@ -197,16 +198,21 @@ export default function Page() {
         parts: [{ text: msg.text }],
       }));
 
-    fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ 
-        message: messageToSend,
-        history: conversationHistory,
-      }),
-    })
+    const buildRequest = (): Promise<Response> => {
+      if (fileForFetch && medicalMode) {
+        const fd = new FormData();
+        fd.append("image", fileForFetch);
+        fd.append("question", messageToSend || "What does this medical image show?");
+        return fetch("/api/chat", { method: "POST", body: fd });
+      }
+      return fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: messageToSend }),
+      });
+    };
+
+    buildRequest()
       .then(response => response.json())
       .then(data => {
         const aiText = data.text;
