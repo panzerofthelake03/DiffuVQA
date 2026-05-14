@@ -1,0 +1,8 @@
+chatbot/chat_history.db
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
