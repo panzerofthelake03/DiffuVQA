@@ -9,12 +9,13 @@
   - Stack: Next.js (TypeScript) + shadcn/ui + Tailwind + FastAPI (Python backend)
   - Demo ortamı: Windows PC, RTX 4060 Laptop 8GB VRAM, CUDA 4-bit quantization
   - Adımlar:
-    - [ ] `chatbot/api.py` — FastAPI ile `/ask` endpoint'i yaz (model.py'yi sarar)
-    - [ ] `chatbot/requirements.txt`'e `fastapi`, `uvicorn`, `python-multipart` ekle
-    - [ ] `frontend/` klasörü oluştur, Next.js projesi kur
-    - [ ] Panacea'nın `page.tsx`, `globals.css`, `layout.tsx` ve shadcn/ui bileşenlerini taşı
-    - [ ] Gemini API çağrısını FastAPI `/ask` endpoint'ine yönlendir
-    - [ ] `app.py` (Gradio) kaldır ya da devre dışı bırak
+    - [x] `chatbot/api.py` — FastAPI ile `/infer`, `/history`, `/stats` endpoint'leri yazıldı
+    - [x] `chatbot/requirements.txt`'e `fastapi`, `uvicorn[standard]`, `python-multipart` eklendi
+    - [ ] FastAPI bağımlılıklarını kur: `pip install fastapi "uvicorn[standard]" python-multipart`
+    - [ ] `frontend/` klasörü oluştur — panacea-alpha reposunu klonla
+    - [ ] Panacea'nın `route.ts` içindeki Gemini çağrısını FastAPI `/infer` endpoint'ine yönlendir
+    - [ ] `page.tsx`'i güncelle — görseli base64/FormData olarak `/api/chat`'e ilet
+    - [ ] `app.py` (Gradio) devre dışı bırak
     - [ ] Windows demo PC'de uçtan uca test et
 
 - [ ] **Windows Demo PC Kurulumu**
@@ -70,6 +71,13 @@
 - [x] **Proje düzeni** — Tüm MD dosyaları `docs/` altında toplandı, kök `README.md` yazıldı.
 
 - [x] **requirements.txt** — Python 3.14 uyumlu güncel sürümlere güncellendi, `bitsandbytes` Mac'te kaldırıldı.
+
+- [x] **FastAPI Backend (Adım 1)** — `chatbot/api.py` oluşturuldu:
+  - `POST /infer` — görsel + soru alır, LLaVA-Med inference çalıştırır, DB'ye kaydeder, cevap döner
+  - `GET /history` — son N kaydı döner
+  - `GET /stats` — toplam sorgu sayısını döner
+  - CORS: `localhost:3000` izin verildi (Next.js frontend için)
+  - `requirements.txt`'e `fastapi`, `uvicorn[standard]`, `python-multipart` eklendi
 
 ---
 

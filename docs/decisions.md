@@ -9,9 +9,14 @@
 **Karar:** Gradio arayüzü kaldırılır. Panacea-alpha reposunun Next.js + shadcn/ui arayüzü projeye taşınır. Python backend FastAPI ile sarılır.  
 **Gerekçe:** Demo bilgisayarı Windows PC (RTX 4060 Laptop, 8GB VRAM). Gradio arayüzü görsel olarak yetersiz; Panacea'nın arayüzü zaten çalışan, test edilmiş bir tasarım.  
 **Sonuç:**
-- `chatbot/api.py` → FastAPI, `/ask` endpoint'i
-- `frontend/` → Next.js projesi (Panacea kaynaklı)
-- `chatbot/app.py` (Gradio) devre dışı bırakılacak
+- `chatbot/api.py` → FastAPI, `POST /infer` + `GET /history` + `GET /stats` endpoint'leri ✅ Tamamlandı (2026-05-15)
+- `frontend/` → Next.js projesi (Panacea kaynaklı) — bekliyor
+- `chatbot/app.py` (Gradio) devre dışı bırakılacak — bekliyor
+
+### A4. FastAPI Endpoint Adı: `/ask` → `/infer`
+**Tarih:** 2026-05-15  
+**Karar:** Endpoint adı `/ask` yerine `/infer` olarak belirlendi.  
+**Gerekçe:** `/infer` model inference'ını daha doğru tanımlıyor; `/ask` sohbet/NLP çağrılarıyla karışabilir. Ayrıca `/history` ve `/stats` endpoint'leri de eklendi — Gradio'nun history/stats butonlarının REST karşılıkları.
 
 ---
 
