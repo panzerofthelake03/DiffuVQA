@@ -15,19 +15,18 @@ Bu döküman, DiffuVQA reposundan yeni bir branch açarak LLaVA-Med tabanlı bir
 
 ---
 
-## ADIM 0: Branch Aç
+## ADIM 0: Branch
+
+Branch zaten açıldı: `ChatBotPipeline`
 
 ```bash
-# DiffuVQA reposuna gir
+# Repoyu klonla
+git clone -b ChatBotPipeline https://github.com/panzerofthelake03/DiffuVQA.git
 cd DiffuVQA
 
-# main branch'ten yeni branch aç
-git checkout main
-git pull origin main
-git checkout -b llava-med-chatbot
-
-# Remote'a push et
-git push -u origin llava-med-chatbot
+# veya zaten klonladıysan branch'e geç
+git fetch origin
+git checkout ChatBotPipeline
 ```
 
 ---
