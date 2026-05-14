@@ -1,13 +1,13 @@
 import os
 import torch
 from dotenv import load_dotenv
-from transformers import LlamaTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import LlavaForConditionalGeneration, LlavaProcessor, BitsAndBytesConfig
 from PIL import Image
 
 load_dotenv()
 hf_token = os.getenv("HF_TOKEN")
 
-MODEL_ID = "katielink/llava-med-7b-slake-delta"
+MODEL_ID = "llava-hf/llava-1.5-7b-hf"
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -16,18 +16,18 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_use_double_quant=True,
 )
 
-tokenizer = None
+processor = None
 model = None
 
 
 def load_model():
-    global tokenizer, model
+    global processor, model
     if model is not None:
         return
 
     print("Model yükleniyor... (ilk seferinde 10-15 dakika sürebilir)")
-    tokenizer = LlamaTokenizer.from_pretrained(MODEL_ID, token=hf_token)
-    model = AutoModelForCausalLM.from_pretrained(
+    processor = LlavaProcessor.from_pretrained(MODEL_ID, token=hf_token)
+    model = LlavaForConditionalGeneration.from_pretrained(
         MODEL_ID,
         quantization_config=bnb_config,
         device_map="auto",
@@ -44,23 +44,27 @@ def ask(image_path: str, question: str) -> str:
 
     image = Image.open(image_path).convert("RGB")
 
-    prompt = (
-        "You are a medical AI assistant. "
-        "Answer the following question about the medical image briefly and accurately.\n"
-        f"Question: {question}\nAnswer:"
-    )
+    conversation = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": f"You are a medical AI assistant. Answer briefly and accurately.\n{question}"},
+            ],
+        }
+    ]
 
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+    prompt = processor.apply_chat_template(conversation, add_generation_prompt=True)
+    inputs = processor(images=image, text=prompt, return_tensors="pt").to(model.device)
 
     with torch.no_grad():
         output = model.generate(
             **inputs,
             max_new_tokens=128,
             do_sample=False,
-            temperature=1.0,
             repetition_penalty=1.1,
         )
 
-    decoded = tokenizer.decode(output[0], skip_special_tokens=True)
-    answer = decoded.split("Answer:")[-1].strip()
+    generated_ids = output[0][inputs["input_ids"].shape[1]:]
+    answer = processor.decode(generated_ids, skip_special_tokens=True).strip()
     return answer if answer else "Model cevap üretemedi."

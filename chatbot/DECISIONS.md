@@ -63,36 +63,56 @@ hf_token = os.getenv("HF_TOKEN")
 
 ---
 
-## 4. `AutoTokenizer` → `LlamaTokenizer`
+## 4. `AutoTokenizer` → `LlamaTokenizer` (Geçici, iptal edildi)
 
-**Durum:** Test Aşamasında  
+**Durum:** Geçersiz — #5 ile değiştirildi  
 **Tarih:** 2026-05-14
 
 **Hata:**
 ```
-ValueError: Couldn't instantiate the backend tokenizer from one of:
-(1) a `tokenizers` library serialization file,
-(2) a slow tokenizer instance to convert or
-(3) an equivalent slow tokenizer class to instantiate and convert.
-You need to have sentencepiece or tiktoken installed to convert a slow tokenizer to a fast one.
+ValueError: Couldn't instantiate the backend tokenizer ...
+You need to have sentencepiece or tiktoken installed.
 ```
 
-**Sebep:** `transformers 5.5.4`, `use_fast=False` parametresine rağmen bu eski LLaMA tabanlı modelde `AutoTokenizer` fast tokenizer path'ine giriyor. `sentencepiece` kurulu olmasına rağmen hata devam etti.
+**Sebep:** `transformers 5.5.4`, `use_fast=False` parametresine rağmen fast tokenizer path'ine giriyor. `LlamaTokenizer` geçici çözüm olarak denendi ancak #5'teki hata nedeniyle zaten gereksiz kaldı.
 
-**Karar:** `AutoTokenizer` yerine `LlamaTokenizer` (slow tokenizer) doğrudan kullanılıyor.
+---
+
+## 5. Model Değişikliği — `katielink/llava-med-7b-slake-delta` → `llava-hf/llava-1.5-7b-hf`
+
+**Durum:** Uygulandı  
+**Tarih:** 2026-05-14
+
+**Hata:**
+```
+ValueError: Unrecognized model in katielink/llava-med-7b-slake-delta.
+Should have a `model_type` key in its config.json.
+```
+
+**Kök Neden:** `katielink/llava-med-7b-slake-delta` gerçek bir **delta model**'dir. Bu model tek başına yüklenemez — base LLaMA-7B ağırlıklarına LLaVA'nın `apply_delta.py` scripti çalıştırılarak elle uygulanması gerekiyor. `config.json`'da `model_type` tanımı yok, `from_pretrained` bunu algılayamıyor.
+
+**Karar:** Model, resmi transformers 5.x desteği olan `llava-hf/llava-1.5-7b-hf` ile değiştirildi. Bu model:
+- Doğrudan `from_pretrained` ile yüklenir
+- `LlavaForConditionalGeneration` + `LlavaProcessor` kullanır (görüntüyü de prompt'a dahil eder)
+- `transformers 5.x` ile tam uyumlu
+- Genel VQA görevlerinde güçlü; tıbbi görüntülerde de kullanılabilir
 
 **Değişiklik:** [model.py](model.py)
 ```python
 # Önce
-from transformers import AutoTokenizer, ...
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=False, token=hf_token)
+from transformers import LlamaTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+MODEL_ID = "katielink/llava-med-7b-slake-delta"
+tokenizer = LlamaTokenizer.from_pretrained(MODEL_ID, token=hf_token)
+model = AutoModelForCausalLM.from_pretrained(MODEL_ID, ...)
 
 # Sonra
-from transformers import LlamaTokenizer, ...
-tokenizer = LlamaTokenizer.from_pretrained(MODEL_ID, token=hf_token)
+from transformers import LlavaForConditionalGeneration, LlavaProcessor, BitsAndBytesConfig
+MODEL_ID = "llava-hf/llava-1.5-7b-hf"
+processor = LlavaProcessor.from_pretrained(MODEL_ID, token=hf_token)
+model = LlavaForConditionalGeneration.from_pretrained(MODEL_ID, ...)
 ```
 
-**Açık Risk:** `katielink/llava-med-7b-slake-delta` bir **delta model**'dir — base LLaMA-7B ağırlıklarına delta apply edilerek elde edilmesi gerekir. Doğrudan `from_pretrained` ile yüklenip yüklenmeyeceği henüz doğrulanmadı. Sorun devam ederse model değişikliği gerekebilir.
+`ask()` fonksiyonu da güncellendi: görüntü artık `processor` üzerinden chat template ile prompt'a dahil ediliyor, yalnızca yeni üretilen token'lar decode ediliyor.
 
 ---
 
@@ -100,7 +120,6 @@ tokenizer = LlamaTokenizer.from_pretrained(MODEL_ID, token=hf_token)
 
 | Risk | Önem | Durum |
 |---|---|---|
-| Delta model doğrudan yüklenemiyor olabilir | Yüksek | Araştırılıyor |
-| `transformers 5.5.4` ↔ model (2023) API uyumsuzluğu | Orta | Gözlemleniyor |
 | `bitsandbytes` Windows CUDA desteği | Orta | Test edilmedi |
-| CUDA yok — model GPU olmadan çalışmaz | Yüksek | Bekliyor |
+| CUDA yok — model GPU olmadan çalışmaz | Yüksek | Bekliyor (Colab önerilir) |
+| `llava-1.5-7b-hf` tıbbi fine-tune değil | Düşük | Kabul edildi; genel VQA yeterli |
