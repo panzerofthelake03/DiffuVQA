@@ -25,6 +25,25 @@
     ```
   - `.env` dosyasına `HF_TOKEN` ekle
 
+- [ ] **ADIM 6 — İlk Çalıştırma** Uygulamayı GPU makinede başlat:
+  ```powershell
+  .venv\Scripts\python.exe chatbot\app.py
+  ```
+  İlk çalıştırmada model (~15-20 GB) Hugging Face Hub'dan indirilir.
+
+- [ ] **ADIM 7 — Test** Arayüzde aşağıdaki senaryoları dene:
+  - MRI görüntüsü → `"What modality is shown?"`
+  - X-Ray → `"Is this a chest X-ray?"`
+  - CT → `"Which organ is visible?"`
+  - Geçmiş butonu ve istatistik butonu çalışıyor mu?
+
+- [ ] **ADIM 8 — Commit & Push**
+  ```bash
+  git add chatbot/ .gitignore
+  git commit -m "Add LLaVA-Med chatbot with Gradio UI and SQLite history"
+  git push origin ChatBotPipeline
+  ```
+
 ---
 
 ## Tamamlananlar
@@ -87,7 +106,10 @@
 
 | Konu | Önem | Durum |
 |---|---|---|
-| `bitsandbytes` Windows GPU desteği | Orta | GPU makinede test edilmeli |
+| `bitsandbytes` Windows GPU desteği | Orta | Import başarılı ama gerçek CUDA desteği GPU makinede test edilmeli |
+| `transformers` sürüm farkı | Düşük | Plan 4.37.0 önerdi, 5.5.4 kurulu — API değişiklikleri olabilir |
+| `gradio` sürüm farkı | Çözüldü | Plan 4.19.2, kurulu 6.14.0 — `theme="soft"` string ile uyumluluk sağlandı |
 | `llava-1.5-7b-hf` tıbbi fine-tune değil | Düşük | Kabul edildi; genel VQA yeterli |
 | Model boyutu ilk indirme (~15-20 GB) | Bilgi | Stabil internet gerekli |
+| Windows vs Linux | Düşük | `bitsandbytes` Linux'ta daha güvenilir; sorun çıkarsa WSL2 dene |
 | Symlink uyarısı (HF cache, Windows) | Bilgi | `HF_HUB_DISABLE_SYMLINKS_WARNING=1` ile susturulabilir |
