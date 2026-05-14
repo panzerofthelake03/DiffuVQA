@@ -8,13 +8,14 @@ load_dotenv()
 hf_token = os.getenv("HF_TOKEN")
 
 MODEL_ID = "llava-hf/llava-1.5-7b-hf"
+CUDA_AVAILABLE = torch.cuda.is_available()
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_compute_dtype=torch.float16,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_use_double_quant=True,
-)
+) if CUDA_AVAILABLE else None
 
 processor = None
 model = None
@@ -25,15 +26,23 @@ def load_model():
     if model is not None:
         return
 
-    print("Model yükleniyor... (ilk seferinde 10-15 dakika sürebilir)")
+    if CUDA_AVAILABLE:
+        print("GPU bulundu — 4-bit quantization ile yükleniyor...")
+    else:
+        print("GPU bulunamadı — CPU modunda yükleniyor (UYARI: çok yavaş, ~14GB RAM gerekir)")
+
     processor = LlavaProcessor.from_pretrained(MODEL_ID, token=hf_token)
-    model = LlavaForConditionalGeneration.from_pretrained(
-        MODEL_ID,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=torch.float16,
-        token=hf_token,
-    )
+
+    kwargs = dict(token=hf_token)
+    if CUDA_AVAILABLE:
+        kwargs["quantization_config"] = bnb_config
+        kwargs["device_map"] = "auto"
+        kwargs["torch_dtype"] = torch.float16
+    else:
+        kwargs["device_map"] = "cpu"
+        kwargs["torch_dtype"] = torch.float32
+
+    model = LlavaForConditionalGeneration.from_pretrained(MODEL_ID, **kwargs)
     model.eval()
     print("Model yüklendi.")
 

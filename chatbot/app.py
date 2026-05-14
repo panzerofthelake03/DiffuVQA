@@ -40,7 +40,7 @@ def on_stats():
 print("Uygulama başlatılıyor...")
 load_model()
 
-with gr.Blocks(title="Medical VQA — LLaVA-Med", theme="soft") as demo:
+with gr.Blocks(title="Medical VQA — LLaVA-Med") as demo:
     gr.Markdown("# Medical Visual Question Answering\nLLaVA-Med (SLAKE fine-tuned)")
 
     with gr.Row():
@@ -82,7 +82,7 @@ with gr.Blocks(title="Medical VQA — LLaVA-Med", theme="soft") as demo:
 
 if __name__ == "__main__":
     demo.launch(
-        server_name="0.0.0.0",
+        server_name="127.0.0.1",
         server_port=7860,
-        share=True,
+        theme="soft",
     )

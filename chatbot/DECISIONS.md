@@ -5,16 +5,24 @@
 **Durum:** Çözüldü  
 **Tarih:** 2026-05-14
 
-**Sorun:** Plan `gradio==4.19.2` öngörüyordu. Kurulumda `gradio 6.14.0` geldi. `gr.themes.Soft()` objesi 6.x'te `theme="soft"` string'ine dönüştü.
+**Sorun:** Plan `gradio==4.19.2` öngörüyordu. Kurulumda `gradio 6.14.0` geldi. İki kırılma değişikliği:
+- `gr.themes.Soft()` → `theme="soft"` string'i
+- Gradio 6.0'da `theme` parametresi `gr.Blocks()`'tan `launch()`'a taşındı
 
 **Değişiklik:** [app.py](app.py)
 ```python
 # Önce
 with gr.Blocks(title="...", theme=gr.themes.Soft()) as demo:
+    ...
+demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
 
 # Sonra
-with gr.Blocks(title="...", theme="soft") as demo:
+with gr.Blocks(title="...") as demo:
+    ...
+demo.launch(server_name="127.0.0.1", server_port=7860, theme="soft")
 ```
+
+`server_name` ayrıca `0.0.0.0`'dan `127.0.0.1`'e alındı; tarayıcıda `http://localhost:7860` ile açılıyor.
 
 ---
 
@@ -116,10 +124,55 @@ model = LlavaForConditionalGeneration.from_pretrained(MODEL_ID, ...)
 
 ---
 
+## 6. CPU Fallback — CUDA Olmadan Yükleme
+
+**Durum:** Uygulandı  
+**Tarih:** 2026-05-14
+
+**Hata:**
+```
+ValueError: Some modules are dispatched on the CPU or the disk.
+Make sure you have enough GPU RAM to fit the quantized model.
+```
+
+**Sebep:** `bitsandbytes` 4-bit quantization CUDA gerektiriyor. Yerel makinede GPU (`torch.cuda.is_available() = False`) yok, model CPU'ya yüklenmeye çalışıldı ama `quantization_config` + `device_map="auto"` çakıştı.
+
+**Karar:** `CUDA_AVAILABLE` flag'i ile runtime'da iki yol ayrıldı:
+- **GPU varsa:** `quantization_config=bnb_config`, `device_map="auto"`, `torch.float16`
+- **GPU yoksa:** `quantization_config` yok, `device_map="cpu"`, `torch.float32`
+
+**Uyarı:** CPU modunda ~14GB RAM gerekir ve her inference birkaç dakika sürer. Gerçek kullanım için GPU (Colab T4) önerilir.
+
+---
+
+## 7. `torch` CPU-Only → CUDA Build
+
+**Durum:** Çözüldü  
+**Tarih:** 2026-05-14
+
+**Sorun:** `torch.cuda.is_available()` = False dönüyordu. `nvidia-smi` ile GPU'nun var olduğu doğrulandı (RTX 4060 Laptop, 8GB, driver 581.29 / CUDA 12.x). Kurulu `torch 2.11.0` CPU-only index'ten gelmişti.
+
+**Çözüm:**
+```powershell
+pip uninstall torch torchvision -y
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# → torch 2.6.0+cu124 kuruldu
+```
+
+**Doğrulama:**
+```
+CUDA available: True
+Torch version: 2.6.0+cu124
+GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+```
+
+Artık `model.py`'deki `CUDA_AVAILABLE = True` path'i devreye giriyor: 4-bit quantization + `device_map="auto"` + `torch.float16`.
+
+---
+
 ## Açık Riskler
 
 | Risk | Önem | Durum |
 |---|---|---|
-| `bitsandbytes` Windows CUDA desteği | Orta | Test edilmedi |
-| CUDA yok — model GPU olmadan çalışmaz | Yüksek | Bekliyor (Colab önerilir) |
 | `llava-1.5-7b-hf` tıbbi fine-tune değil | Düşük | Kabul edildi; genel VQA yeterli |
+| Symlink uyarısı (HF cache, Windows) | Bilgi | `HF_HUB_DISABLE_SYMLINKS_WARNING=1` ile susturulabilir |
