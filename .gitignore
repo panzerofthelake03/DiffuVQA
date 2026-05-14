@@ -1,4 +1,5 @@
 chatbot/chat_history.db
+.env
 __pycache__/
 *.pyc
 *.pyo

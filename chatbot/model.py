@@ -1,6 +1,11 @@
+import os
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from dotenv import load_dotenv
+from transformers import LlamaTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from PIL import Image
+
+load_dotenv()
+hf_token = os.getenv("HF_TOKEN")
 
 MODEL_ID = "katielink/llava-med-7b-slake-delta"
 
@@ -21,12 +26,13 @@ def load_model():
         return
 
     print("Model yükleniyor... (ilk seferinde 10-15 dakika sürebilir)")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=False)
+    tokenizer = LlamaTokenizer.from_pretrained(MODEL_ID, token=hf_token)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
         quantization_config=bnb_config,
         device_map="auto",
         torch_dtype=torch.float16,
+        token=hf_token,
     )
     model.eval()
     print("Model yüklendi.")
