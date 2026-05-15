@@ -24,7 +24,6 @@ type Message = {
 export default function Page() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [medicalMode, setMedicalMode] = useState(false);
   const [hintMessage, setHintMessage] = useState("");
   const [lightboxData, setLightboxData] = useState<{ url: string; type: "image" | "pdf" } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -148,10 +147,6 @@ export default function Page() {
     if (!inputValue.trim() && !selectedFile) return;
     if (isTyping) return;
 
-    if (selectedFile && !medicalMode) {
-      setHintMessage("Enable Medical Mode for VQA analysis.");
-      return;
-    }
 
     flushActiveTyping();
     clearTimers();
@@ -161,7 +156,7 @@ export default function Page() {
 
     const userMessage: Message = {
       id: Date.now(),
-      text: selectedFile ? selectedFile.name : inputValue,
+      text: inputValue,
       sender: "user",
       fileUrl: previewUrl ?? undefined,
       fileType: selectedFile?.type.startsWith("image/") ? "image" : selectedFile?.type === "application/pdf" ? "pdf" : undefined,
@@ -199,7 +194,7 @@ export default function Page() {
       }));
 
     const buildRequest = (): Promise<Response> => {
-      if (fileForFetch && medicalMode) {
+      if (fileForFetch) {
         const fd = new FormData();
         fd.append("image", fileForFetch);
         fd.append("question", messageToSend || "What does this medical image show?");
@@ -373,17 +368,22 @@ export default function Page() {
                         ))}
                       </div>
                     ) : message.fileType === "image" && message.fileUrl ? (
-                      <button
-                        type="button"
-                        onClick={() => setLightboxData({ url: message.fileUrl!, type: "image" })}
-                        className="group w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-0"
-                      >
-                        <img
-                          src={message.fileUrl}
-                          alt={message.fileName ?? "Uploaded image"}
-                          className="h-auto w-full rounded-lg object-cover transition duration-200 group-hover:scale-105"
-                        />
-                      </button>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setLightboxData({ url: message.fileUrl!, type: "image" })}
+                          className="group w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-0"
+                        >
+                          <img
+                            src={message.fileUrl}
+                            alt={message.fileName ?? "Uploaded image"}
+                            className="h-auto w-full rounded-lg object-cover transition duration-200 group-hover:scale-105"
+                          />
+                        </button>
+                        {message.text && (
+                          <span className="text-sm text-slate-800">{message.text}</span>
+                        )}
+                      </div>
                     ) : message.fileType === "pdf" && message.fileUrl ? (
                       <button
                         type="button"
@@ -413,24 +413,6 @@ export default function Page() {
 
         <div className="p-4 border-t border-slate-200">
           <div className="flex flex-col gap-4 mb-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <span className="text-sm font-medium text-slate-900">Medical Analysis Mode</span>
-              <button
-                type="button"
-                onClick={() => setMedicalMode((prev) => !prev)}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ${
-                  medicalMode ? "bg-blue-500" : "bg-slate-300"
-                }`}
-                aria-pressed={medicalMode}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-                    medicalMode ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
-              </button>
-            </div>
-
             {selectedFile && (
               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
                 {previewUrl ? (
@@ -458,12 +440,6 @@ export default function Page() {
               </div>
             )}
 
-            {medicalMode && (
-              <div className="rounded-full bg-blue-600 px-3 py-1 text-xs text-white shadow-sm">
-                Medical Mode Active: DiffuVQA
-              </div>
-            )}
-
             {hintMessage && (
               <div className="rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 {hintMessage}
@@ -477,9 +453,7 @@ export default function Page() {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               disabled={isTyping}
-              className={`pr-20 rounded-full border text-slate-900 placeholder:text-slate-500 ${
-                medicalMode ? "border-blue-500 ring-2 ring-blue-500/20" : "border-slate-300"
-              }`}
+              className="pr-20 rounded-full border border-blue-500 ring-2 ring-blue-500/20 text-slate-900 placeholder:text-slate-500"
               placeholder="Type your message..."
             />
             <Button
