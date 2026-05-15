@@ -13,26 +13,68 @@ PubMedBERT/
 └── docs/             # Tüm dökümanlar
 ```
 
-## Hızlı Başlangıç (Chatbot)
+## Kurulum
 
 ```bash
 # 1. Sanal ortam oluştur ve aktifleştir
-python3 -m venv venv
-source venv/bin/activate          # Mac/Linux
-# venv\Scripts\activate           # Windows
+python -m venv venv
+venv\Scripts\activate             # Windows
+# source venv/bin/activate        # Mac/Linux
 
-# 2. Bağımlılıkları yükle
+# 2. Python bağımlılıklarını yükle
 pip install -r chatbot/requirements.txt
 
-# 3. HuggingFace token ayarla (model gated ise)
-echo "HF_TOKEN=hf_..." > .env
-
-# 4. Uygulamayı başlat
-python -m chatbot.app
-# → http://localhost:7860
+# 3. HuggingFace token ayarla (.env dosyası repo kökünde)
+# .env içeriği:
+# HF_TOKEN=hf_...
 ```
 
-> **Not:** CPU'da ~14 GB RAM gerekir, GPU (CUDA) varsa otomatik olarak 4-bit quantization devreye girer.
+> **Not:** CPU'da ~14 GB RAM gerekir; CUDA GPU varsa otomatik 4-bit quantization devreye girer (RTX 4060 ile test edildi).
+
+---
+
+## Servisleri Çalıştırma
+
+Her servis ayrı bir terminal penceresinde çalıştırılır.
+
+### 1 — FastAPI (LLaVA Backend)
+
+Next.js frontend ile konuşan REST API. Model ilk istekte yüklenir (~1-2 dk).
+
+```bash
+# Repo kökünden çalıştır
+uvicorn chatbot.api:app --host 127.0.0.1 --port 8000 --reload
+# → http://127.0.0.1:8000
+# → http://127.0.0.1:8000/docs  (Swagger UI)
+```
+
+Endpoints:
+| Method | Path | Açıklama |
+|--------|------|----------|
+| `POST` | `/infer` | Görüntü + soru gönder, cevap al |
+| `GET`  | `/history` | Son N soruyu listele (`?limit=20`) |
+| `GET`  | `/stats` | Toplam soru sayısı |
+
+### 2 — Next.js Frontend
+
+```bash
+cd frontend
+npm install          # ilk kurulumda
+npm run dev
+# → http://localhost:3000
+```
+
+Frontend, `/api/chat` route'u üzerinden `http://127.0.0.1:8000/infer` adresine istek atar. FastAPI'nin çalışıyor olması gerekir.
+
+### 3 — Gradio Arayüzü (Bağımsız, isteğe bağlı)
+
+Next.js gerektirmeden modeli doğrudan test etmek için kullanılır.
+
+```bash
+# Repo kökünden çalıştır
+python -m chatbot.app
+# → http://127.0.0.1:7860
+```
 
 ## Dökümanlar
 
