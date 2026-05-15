@@ -44,6 +44,11 @@ export default function Page() {
   const [messageCount, setMessageCount] = useState(0);
   const [scrollMode, setScrollMode] = useState<"bottom" | "start">("bottom");
   const [activeChunkId, setActiveChunkId] = useState<number | null>(null);
+  const [lastImage, setLastImage] = useState<File | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [fontSize, setFontSize] = useState<"sm" | "base" | "lg">("base");
+  const [chatWidth, setChatWidth] = useState<"narrow" | "normal" | "wide">("normal");
+  const [sendOnEnter, setSendOnEnter] = useState(true);
 
   useEffect(() => {
     setMounted(true);
@@ -147,18 +152,45 @@ export default function Page() {
     if (!inputValue.trim() && !selectedFile) return;
     if (isTyping) return;
 
-
     flushActiveTyping();
     clearTimers();
 
     const nextCount = messageCount + 1;
     const isFifthMessage = nextCount % 5 === 0;
 
+    // Image only — store it and wait for a question
+    if (selectedFile && !inputValue.trim()) {
+      const userMsg: Message = {
+        id: Date.now(),
+        text: "",
+        sender: "user",
+        fileUrl: previewUrl ?? undefined,
+        fileType: selectedFile.type.startsWith("image/") ? "image" : selectedFile.type === "application/pdf" ? "pdf" : undefined,
+        fileName: selectedFile.name,
+      };
+      const aiPrompt: Message = {
+        id: Date.now() + 1,
+        text: "Image received. What would you like to know about it?",
+        sender: "ai",
+      };
+      setLastImage(selectedFile);
+      setMessages((prev) => [...prev, userMsg, aiPrompt]);
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      setHintMessage("");
+      setMessageCount(nextCount);
+      return;
+    }
+
+    // Use current file or fall back to last uploaded image
+    const imageToUse = selectedFile ?? lastImage;
+    if (selectedFile) setLastImage(selectedFile);
+
     const userMessage: Message = {
       id: Date.now(),
       text: inputValue,
       sender: "user",
-      fileUrl: previewUrl ?? undefined,
+      fileUrl: selectedFile ? (previewUrl ?? undefined) : undefined,
       fileType: selectedFile?.type.startsWith("image/") ? "image" : selectedFile?.type === "application/pdf" ? "pdf" : undefined,
       fileName: selectedFile?.name,
     };
@@ -170,7 +202,7 @@ export default function Page() {
       isTyping: true,
     };
 
-    const fileForFetch = selectedFile;
+    const fileForFetch = imageToUse;
     const messageToSend = inputValue;
 
     setMessages((prev) => [...prev, userMessage, typingMessage]);
@@ -182,16 +214,6 @@ export default function Page() {
     setMessageCount(nextCount);
     setScrollMode(isFifthMessage ? "start" : "bottom");
     hasScrolledStartRef.current = false;
-
-    // Build conversation history for stateful chat
-    // Filter out the typing message and system prompts, include only completed messages
-    const conversationHistory = messages
-      .filter(msg => msg.sender === "user" || msg.sender === "ai")
-      .filter(msg => !msg.isTyping) // Exclude incomplete messages
-      .map((msg) => ({
-        role: msg.sender === "user" ? "user" : "model",
-        parts: [{ text: msg.text }],
-      }));
 
     const buildRequest = (): Promise<Response> => {
       if (fileForFetch) {
@@ -214,12 +236,7 @@ export default function Page() {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === typingMessage.id
-              ? {
-                  ...msg,
-                  text: "",
-                  fullText: aiText,
-                  isTyping: false,
-                }
+              ? { ...msg, text: "", fullText: aiText, isTyping: false }
               : msg
           )
         );
@@ -254,7 +271,7 @@ export default function Page() {
           }, 30);
         }, 0);
       })
-      .catch(error => {
+      .catch(() => {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === typingMessage.id
@@ -267,11 +284,20 @@ export default function Page() {
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && sendOnEnter) {
       e.preventDefault();
       handleSendMessage();
     }
   };
+
+  const clearChat = () => {
+    setMessages([{ id: 1, text: "Hello, how can I help with your medical query?", sender: "ai" }]);
+    setLastImage(null);
+    setShowSettings(false);
+  };
+
+  const fontSizeClass = fontSize === "sm" ? "text-sm" : fontSize === "lg" ? "text-lg" : "text-base";
+  const chatWidthClass = chatWidth === "narrow" ? "max-w-2xl" : chatWidth === "wide" ? "max-w-6xl" : "max-w-4xl";
 
   // Mock chat history
   const chatHistory = [
@@ -281,10 +307,10 @@ export default function Page() {
   ];
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-white dark:bg-gray-900">
       {/* Sidebar */}
-      <div className="w-64 bg-slate-100 border-r border-slate-200 p-4 flex flex-col">
-        <Button variant="outline" className="mb-4 text-slate-900 border-slate-300 hover:bg-slate-200">
+      <div className="w-64 bg-slate-100 dark:bg-gray-800 border-r border-slate-200 dark:border-gray-700 p-4 flex flex-col">
+        <Button variant="outline" className="mb-4 text-slate-900 dark:text-gray-100 border-slate-300 dark:border-gray-600 hover:bg-slate-200 dark:hover:bg-gray-700 dark:bg-gray-800">
           <Plus className="w-4 h-4 mr-2" />
           New Chat
         </Button>
@@ -295,7 +321,7 @@ export default function Page() {
               <Button
                 key={chat.id}
                 variant="ghost"
-                className="w-full justify-start text-left text-slate-900 hover:bg-slate-200"
+                className="w-full justify-start text-left text-slate-900 dark:text-gray-100 hover:bg-slate-200 dark:hover:bg-gray-700"
               >
                 {chat.title}
               </Button>
@@ -303,30 +329,30 @@ export default function Page() {
           </div>
         </ScrollArea>
 
-        <Separator className="my-4" />
+        <Separator className="my-4 dark:bg-gray-700" />
 
         <div className="flex items-center gap-2">
           <Avatar>
-            <AvatarFallback className="text-slate-900">U</AvatarFallback>
+            <AvatarFallback className="text-slate-900 dark:text-gray-100 dark:bg-gray-700">U</AvatarFallback>
           </Avatar>
           <Button
             variant="ghost"
             size="icon"
             onClick={toggleTheme}
-            className="text-slate-900 hover:bg-slate-200"
+            className="text-slate-900 dark:text-gray-100 hover:bg-slate-200 dark:hover:bg-gray-700"
           >
             {mounted && (theme === "light" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />)}
           </Button>
-          <Button variant="ghost" size="icon" className="text-slate-900 hover:bg-slate-200">
+          <Button variant="ghost" size="icon" onClick={() => setShowSettings(true)} className="text-slate-900 dark:text-gray-100 hover:bg-slate-200 dark:hover:bg-gray-700">
             <Settings className="w-4 h-4" />
           </Button>
         </div>
       </div>
 
       {/* Main Chat */}
-      <div className="flex-1 bg-white flex flex-col">
+      <div className="flex-1 bg-white dark:bg-gray-900 flex flex-col">
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="max-w-4xl mx-auto space-y-4">
+          <div className={`${chatWidthClass} mx-auto space-y-4`}>
             <AnimatePresence mode="popLayout">
               {messages.map((message) => (
                 <motion.div
@@ -340,10 +366,10 @@ export default function Page() {
                 >
                   <div
                     ref={message.id === activeChunkId ? messageStartRef : null}
-                    className={`max-w-[80%] break-words whitespace-pre-wrap px-4 py-2 rounded-lg text-slate-900 ${
+                    className={`max-w-[80%] break-words whitespace-pre-wrap px-4 py-2 rounded-lg text-slate-900 dark:text-gray-100 ${fontSizeClass} ${
                       message.sender === "user"
-                        ? "bg-blue-50 border border-blue-200"
-                        : "bg-white border border-slate-200"
+                        ? "bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800"
+                        : "bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700"
                     }`}
                   >
                     {message.isTyping ? (
@@ -372,7 +398,7 @@ export default function Page() {
                         <button
                           type="button"
                           onClick={() => setLightboxData({ url: message.fileUrl!, type: "image" })}
-                          className="group w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-0"
+                          className="group w-full overflow-hidden rounded-lg border border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-700 p-0"
                         >
                           <img
                             src={message.fileUrl}
@@ -381,22 +407,22 @@ export default function Page() {
                           />
                         </button>
                         {message.text && (
-                          <span className="text-sm text-slate-800">{message.text}</span>
+                          <span className="text-sm text-slate-800 dark:text-gray-200">{message.text}</span>
                         )}
                       </div>
                     ) : message.fileType === "pdf" && message.fileUrl ? (
                       <button
                         type="button"
                         onClick={() => setLightboxData({ url: message.fileUrl!, type: "pdf" })}
-                        className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-slate-300"
+                        className="w-full rounded-xl border border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-700 p-3 text-left transition hover:border-slate-300 dark:hover:border-gray-600"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-200 text-slate-700">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-200 dark:bg-gray-600 text-slate-700 dark:text-gray-200">
                             <FileText className="h-5 w-5" />
                           </div>
-                          <div className="min-w-0 text-sm text-slate-900">
+                          <div className="min-w-0 text-sm text-slate-900 dark:text-gray-100">
                             <div className="font-medium truncate">{message.fileName}</div>
-                            <div className="text-xs text-slate-500">PDF document</div>
+                            <div className="text-xs text-slate-500 dark:text-gray-400">PDF document</div>
                           </div>
                         </div>
                       </button>
@@ -411,10 +437,10 @@ export default function Page() {
           </div>
         </div>
 
-        <div className="p-4 border-t border-slate-200">
+        <div className="p-4 border-t border-slate-200 dark:border-gray-700">
           <div className="flex flex-col gap-4 mb-4">
             {selectedFile && (
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 px-3 py-2">
                 {previewUrl ? (
                   <img
                     src={previewUrl}
@@ -422,18 +448,18 @@ export default function Page() {
                     className="h-12 w-12 rounded-lg object-cover"
                   />
                 ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-slate-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-slate-700 dark:text-gray-300">
                     <FileText className="h-5 w-5" />
                   </div>
                 )}
-                <div className="min-w-0 flex-1 text-sm text-slate-900">
+                <div className="min-w-0 flex-1 text-sm text-slate-900 dark:text-gray-100">
                   <div className="font-medium truncate">{selectedFile.name}</div>
-                  <div className="text-xs text-slate-500">{selectedFile.type}</div>
+                  <div className="text-xs text-slate-500 dark:text-gray-400">{selectedFile.type}</div>
                 </div>
                 <button
                   type="button"
                   onClick={removeSelectedFile}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 transition hover:bg-slate-100"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-slate-500 dark:text-gray-400 transition hover:bg-slate-100 dark:hover:bg-gray-600"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -453,13 +479,13 @@ export default function Page() {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               disabled={isTyping}
-              className="pr-20 rounded-full border border-blue-500 ring-2 ring-blue-500/20 text-slate-900 placeholder:text-slate-500"
+              className="pr-20 rounded-full border border-blue-500 ring-2 ring-blue-500/20 text-slate-900 dark:text-gray-100 placeholder:text-slate-500 dark:placeholder:text-gray-500 bg-white dark:bg-gray-800"
               placeholder="Type your message..."
             />
             <Button
               variant="ghost"
               size="icon"
-              className="absolute right-10 top-1/2 -translate-y-1/2 text-slate-900 hover:bg-slate-200"
+              className="absolute right-10 top-1/2 -translate-y-1/2 text-slate-900 dark:text-gray-100 hover:bg-slate-200 dark:hover:bg-gray-700"
               onClick={handleFileUpload}
               disabled={isTyping}
             >
@@ -468,7 +494,7 @@ export default function Page() {
             <Button
               variant="ghost"
               size="icon"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-900 hover:bg-slate-200"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-900 dark:text-gray-100 hover:bg-slate-200 dark:hover:bg-gray-700"
               onClick={handleSendMessage}
               disabled={isTyping || (!inputValue.trim() && !selectedFile)}
             >
@@ -488,14 +514,14 @@ export default function Page() {
       <AnimatePresence>
         {lightboxData && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-white/95 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-gray-900/95 p-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setLightboxData(null)}
           >
             <motion.div
-              className="relative max-w-[90vw] max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl"
+              className="relative max-w-[90vw] max-h-[90vh] overflow-hidden rounded-3xl bg-white dark:bg-gray-800 shadow-2xl"
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
@@ -505,17 +531,127 @@ export default function Page() {
               <button
                 type="button"
                 onClick={() => setLightboxData(null)}
-                className="absolute right-4 top-4 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-900 shadow-lg"
+                className="absolute right-4 top-4 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-gray-700 text-slate-900 dark:text-gray-100 shadow-lg"
               >
                 <X className="h-5 w-5" />
               </button>
-              <div className="h-[80vh] w-[90vw] bg-white p-6">
+              <div className="h-[80vh] w-[90vw] bg-white dark:bg-gray-800 p-6">
                 {lightboxData.type === "pdf" ? (
                   <embed src={lightboxData.url} type="application/pdf" width="100%" height="100%" />
                 ) : (
                   <img src={lightboxData.url} alt="Preview" className="h-full w-full object-contain" />
                 )}
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowSettings(false)}
+          >
+            <motion.div
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-80 p-6 flex flex-col gap-5"
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold text-slate-900 dark:text-gray-100">Settings</h2>
+                <button onClick={() => setShowSettings(false)} className="text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Theme */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-slate-500 dark:text-gray-400 uppercase tracking-wide">Theme</span>
+                <div className="flex gap-2">
+                  {(["light", "dark"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setTheme(t)}
+                      className={`flex-1 py-2 rounded-lg border text-sm font-medium capitalize transition ${
+                        theme === t
+                          ? "bg-blue-500 text-white border-blue-500"
+                          : "bg-white dark:bg-gray-700 text-slate-700 dark:text-gray-200 border-slate-200 dark:border-gray-600 hover:bg-slate-50 dark:hover:bg-gray-600"
+                      }`}
+                    >
+                      {t === "light" ? "☀️ Light" : "🌙 Dark"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Font Size */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-slate-500 dark:text-gray-400 uppercase tracking-wide">Font Size</span>
+                <div className="flex gap-2">
+                  {([["sm", "A", "text-xs"], ["base", "A", "text-sm"], ["lg", "A", "text-base"]] as const).map(([val, label, cls]) => (
+                    <button
+                      key={val}
+                      onClick={() => setFontSize(val)}
+                      className={`flex-1 py-2 rounded-lg border font-medium transition ${cls} ${
+                        fontSize === val
+                          ? "bg-blue-500 text-white border-blue-500"
+                          : "bg-white dark:bg-gray-700 text-slate-700 dark:text-gray-200 border-slate-200 dark:border-gray-600 hover:bg-slate-50 dark:hover:bg-gray-600"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Chat Width */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-slate-500 dark:text-gray-400 uppercase tracking-wide">Chat Width</span>
+                <div className="flex gap-2">
+                  {(["narrow", "normal", "wide"] as const).map((w) => (
+                    <button
+                      key={w}
+                      onClick={() => setChatWidth(w)}
+                      className={`flex-1 py-2 rounded-lg border text-sm font-medium capitalize transition ${
+                        chatWidth === w
+                          ? "bg-blue-500 text-white border-blue-500"
+                          : "bg-white dark:bg-gray-700 text-slate-700 dark:text-gray-200 border-slate-200 dark:border-gray-600 hover:bg-slate-50 dark:hover:bg-gray-600"
+                      }`}
+                    >
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Send on Enter */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-700 dark:text-gray-300">Send on Enter</span>
+                <button
+                  onClick={() => setSendOnEnter((v) => !v)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${sendOnEnter ? "bg-blue-500" : "bg-slate-200 dark:bg-gray-600"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${sendOnEnter ? "translate-x-5" : "translate-x-0"}`}
+                  />
+                </button>
+              </div>
+
+              {/* Clear Conversation */}
+              <button
+                onClick={clearChat}
+                className="w-full py-2 rounded-lg border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 transition"
+              >
+                Clear Conversation
+              </button>
             </motion.div>
           </motion.div>
         )}
