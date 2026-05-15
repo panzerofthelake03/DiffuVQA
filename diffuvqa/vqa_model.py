@@ -12,7 +12,8 @@ import torch.nn.functional as F
 from torchvision import models
 import math
 from diffuvqa.attention.attention_model import MultiHeadedAttention, cross_attention
-from diffuvqa.vision_encoders.clip_model import build_model
+# CHANGED: replaced CLIP import with DINOv2 equivalent
+from diffuvqa.vision_encoders.dinov2_model import build_dinov2_model
 from diffuvqa.language_encoders.bert_model import BertCrossLayer, answer_fusion_module, pre_training_module
 from diffuvqa.utils.nn import SiLU, linear, timestep_embedding
 
@@ -78,7 +79,11 @@ class feature_fusion(nn.Module):
         self.bert_embedding_dropout = bert.embeddings.dropout
         self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
         self.modality_type_embeddings.apply(self.init_weights)
-        self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
+        # CHANGED: build DINOv2 instead of CLIP; args.image_encoder is now a
+        # HuggingFace model ID (e.g. "facebook/dinov2-base") set in config.json.
+        # resolution_after is no longer needed — DINOv2 handles arbitrary input
+        # sizes internally via position-embedding interpolation.
+        self.vision_encoder = build_dinov2_model(args.image_encoder)
 
         # Dynamically determine the channel dimension produced by the vision encoder
         # by running a single dummy forward pass. This avoids the hardcoded 145 and
