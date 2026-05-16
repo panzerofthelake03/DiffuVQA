@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -)",
+      "Bash(py -c \"import json; json.load\\(open\\('c:/Users/BARIS/Documents/GitHub/DiffuVQA/shared/run_diffuvqa_colab.ipynb', encoding='utf-8'\\)\\); print\\('Valid JSON'\\)\")",
+      "Bash(py -c \"import json; json.load\\(open\\('c:/Users/BARIS/Documents/GitHub/DiffuVQA/shared/run_diffuvqa_colab.ipynb', encoding='utf-8-sig'\\)\\); print\\('Valid JSON'\\)\")"
+    ]
+  }
+}
