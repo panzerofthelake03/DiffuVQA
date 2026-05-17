@@ -240,7 +240,7 @@ class TransformerNetModel(nn.Module):
             hidden_t_dim,
             dropout=0,
             config=None,
-            config_name='dmis-lab/biobert-base-cased-v1.1',
+            config_name='dmis-lab/biobert-base-cased-v1.2',
             vocab_size=None,
             init_pretrained='no',
             logits_mode=1,

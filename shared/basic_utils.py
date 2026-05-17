@@ -26,7 +26,7 @@ class myTokenizer():
             print('save tokenizer to', args.checkpoint_path)
             
         elif args.vocab == 'bio-bert':
-            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.1")
+            tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
@@ -155,7 +155,7 @@ def create_model_and_diffusion(args):
             output_dims=output_dims,
             hidden_t_dim=args.hidden_t_dim,
             dropout=args.dropout,
-            config_name='dmis-lab/biobert-base-cased-v1.1',
+            config_name='dmis-lab/biobert-base-cased-v1.2',
             vocab_size=args.vocab_size,
             init_pretrained='bert',
             args=args
