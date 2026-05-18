@@ -79,6 +79,8 @@ class feature_fusion(nn.Module):
         self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
         self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
+        for p in self.vision_encoder.parameters():
+            p.requires_grad_(False)
 
         # Dynamically determine the channel dimension produced by the vision encoder
         # by running a single dummy forward pass. This avoids the hardcoded 145 and
@@ -339,6 +341,8 @@ class TransformerNetModel(nn.Module):
             except Exception:
                 pass
 
+            self.lm_head.weight = self.word_embedding.weight
+
             del temp_bert.embeddings
             del temp_bert.pooler
 
@@ -377,6 +381,8 @@ class TransformerNetModel(nn.Module):
             except Exception:
                 pass
 
+            self.lm_head.weight = self.word_embedding.weight
+
             del temp_bert.embeddings
             del temp_bert.pooler
 
@@ -414,6 +420,8 @@ class TransformerNetModel(nn.Module):
                         self.position_embeddings_proj.bias.data.zero_()
             except Exception:
                 pass
+
+            self.lm_head.weight = self.word_embedding.weight
 
             del temp_roberta.embeddings
             del temp_roberta.pooler
@@ -460,9 +468,9 @@ class TransformerNetModel(nn.Module):
             return self.lm_head(hidden_repr)
         elif self.logits_mode == 2:  # standard cosine similarity
             text_emb = hidden_repr
-            emb_norm = (self.lm_head.weight ** 2).sum(-1).view(-1, 1)  # vocab
-            text_emb_t = th.transpose(text_emb.view(-1, text_emb.size(-1)), 0, 1)  # d, bsz*seqlen
-            arr_norm = (text_emb ** 2).sum(-1).view(-1, 1)  # bsz*seqlen, 1
+            emb_norm = (self.lm_head.weight ** 2).sum(-1).reshape(-1, 1)  # vocab
+            text_emb_t = th.transpose(text_emb.reshape(-1, text_emb.size(-1)), 0, 1)  # d, bsz*seqlen
+            arr_norm = (text_emb ** 2).sum(-1).reshape(-1, 1)  # bsz*seqlen, 1
             dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * th.mm(self.lm_head.weight,
                                                                      text_emb_t)  # (vocab, d) x (d, bsz*seqlen)
             scores = th.sqrt(th.clamp(dist, 0.0, np.inf)).view(emb_norm.size(0), hidden_repr.size(0),

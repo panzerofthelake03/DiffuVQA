@@ -5,6 +5,94 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+## 2026-05-18
+
+### [KARAR] `diffuvqa/vqa_model.py` — `get_logits` `.view()` → `.reshape()`
+**Değişiklik:** `logits_mode=2` dalında `text_emb.view(-1, ...)` ve `(text_emb**2).sum(-1).view(-1,1)` → `.reshape()`.
+
+**Neden:** CLIP freeze sonrası cross-attention çıktısı non-contiguous bellek layout'ına düşüyor. `.view()` contiguous tensor zorunluluğu var, `.reshape()` değil. `logits_mode=2`'ye geçişimizle birlikte bu kod yolu aktif hale geldi ve her eğitim adımında `RuntimeError` verdi.
+
+---
+
+### [KARAR] Drive gereksiz yazımları temizlendi
+**Değişiklikler:**
+- `train.py`: `import wandb` ve `wandb.init()` bloğu kaldırıldı. `diffuvqa/utils/logger.py`: `import wandb` kaldırıldı.
+- `notebooks` Cell 5: GitHub→`/content`→Drive copytree bloğu kaldırıldı. Kod artık `/content/DiffuVQA`'da çalışıyor; sadece `checkpoints/` Drive'a yazılıyor.
+- `notebooks` Cell 24: `shutil.copy(OUTPUT_CSV, DRIVE_RESULTS_PATH)` kaldırıldı, sadece `files.download()` bırakıldı.
+
+**Neden:** wandb offline run klasörleri her session'da Drive'da birikiyordu (~yüzlerce MB). copytree her hücre çalıştırmasında binlerce dosyayı Drive'a kopyalıyordu — hem yavaş hem Drive/GitHub senkronizasyon riski. Drive'da zaten çalışan projede CSV'yi ayrı bir klasöre kopyalamak anlamsızdı.
+
+**Drive'da kalanlar (gerekli):** `ema_*.pt`, `opt*.pt`, `training_args.json`, `progress.csv`, `log.txt` — Colab session kapanınca kaybolmaması için şart.
+
+---
+
+### [KARAR] `notebooks` — `SAMPLE_STEP` 2000 → 200, `NUM_SAMPLES` 3 → 1
+**Değişiklik:** Config hücresinde `SAMPLE_STEP=200`, `NUM_SAMPLES=1`.
+
+**Neden:** `SAMPLE_STEP == DIFFUSION_STEPS` (her ikisi de 2000) koşulunda `use_ddim=False` devreye giriyor ve tüm 2000 adım sırayla çalışıyor. Her adımda `denoised_fn_round` → `get_efficient_knn` çağrısı → [30522×2048] GPU matris → OOM. `SAMPLE_STEP=200` ile DDIM aktif, 10x daha az adım. Önceki başarılı sampling zaten `samplestep200` ile yapılmıştı (dosya adında görünüyor). `NUM_SAMPLES=3` MBR 3x bellek kullanımı gerektiriyor, mevcut GPU baskısında gereksiz.
+
+---
+
+### [KARAR] `notebooks` Cell 7 — `dataset_local_imgs` path üçlemesi düzeltildi
+**Değişiklik:** `dataset_local_imgs = os.path.join(dataset_local_root, "imgs")` → `dataset_local_imgs = dataset_local_root`.
+
+**Neden:** `IMAGEFOLDER_NAME = "SLAKE/imgs"` zaten `/imgs` ile bitiyor. Cell 7 bunun üstüne `"imgs"` ekliyordu → `SLAKE/imgs/imgs`. ACTIVE_IMAGE_DIR buraya set edilince JSONL'deki `imgs/xmlab102/source.jpg` ile birleşip `SLAKE/imgs/imgs/imgs/xmlab102/source.jpg` üçlemesi çıkıyordu. Tüm örnekler placeholder (siyah görüntü) ile üretildi.
+
+---
+
+### [KARAR] 100k checkpoint analizi — avg_nn_l2=558, lm_head tying bug tespit edildi
+**Bulgular:** Yeni mimariyle (decoder_nll/tT_loss kaldırıldı, CLIP freeze) 100k eğitim sonrası:
+- avg_nn_l2=558 (min=538, max=581) — 200k eski checkpoint ile neredeyse aynı, hiç düşmemiş
+- exact_match=%0.18 (2/1088)
+- contains=%45.7 — referans kelimeler üretiliyor ama 20-30 token uzunluğunda kelime akışı içine gömülü
+- confidence=0.053 — düşük, model kararsız
+
+**Kök neden:** `lm_head` weight tying `bert`/`pubmedbert`/`roberta` dallarında eksikti.
+`TransformerNetModel.__init__` başında `word_embedding` random init ile oluşturuluyor, `lm_head` buna tied ediliyor. Sonra bert dalında `self.word_embedding = temp_bert.embeddings.word_embeddings` ile pretrained ağırlık atanıyor — ama Python'da bu atama `lm_head`'in referansını kopardı, `lm_head` random init haliyle kaldı.
+
+`get_efficient_knn(model_emb=lm_head.weight)` ve `get_logits(logits_mode=2)` random matrise karşı L2 mesafesi hesaplıyordu. Denoised embedding pretrained BERT uzayında, lm_head random uzayda → avg_nn_l2 anlamsız, hiç düşmüyor.
+
+**Karar:** Her 3 pretrained dalın sonuna (`word_embedding` set edildikten sonra) `lm_head.weight = word_embedding.weight` tying eklendi. Sıfırdan eğitim gerekiyor — mevcut checkpointler yanlış uzayda eğitildi.
+
+---
+
+### [KARAR] `diffuvqa/utils/logger.py` + `train.py` — `progress.csv` fresh-start
+**Değişiklik:** `CSVOutputFormat.__init__(append=False)` parametresi zaten mevcut. `train.py`'de `resume_checkpoint=None` ise `append=False` (fresh) geçiliyor. `configure()` ve `make_output_format()` zincirine `append` parametresi eklendi.
+
+**Neden:** Sıfırdan eğitim başlatılınca eski eğitimin satırları progress.csv'de kalıyordu. Örnek: 0→52k temiz eğitim + 117.500 (eski bozuk eğitim) aynı dosyada karışmış haldeydi. Analizi yanıltıyordu. Resume'da (`resume_checkpoint` set) dosya korunuyor — bu davranış doğru.
+
+---
+
+### [KARAR] `diffuvqa/vqa_model.py` — CLIP vision encoder freeze edildi
+**Değişiklik:** `feature_fusion.__init__` içinde `build_model(...)` çağrısının hemen ardından `for p in self.vision_encoder.parameters(): p.requires_grad_(False)` eklendi.
+
+**Neden:** CLIP ViT-B/32 ~151M parametreden oluşuyor ve medical VQA için zaten zengin visual features üretiyor. Gradyan akışına açık bırakıldığında: (1) eğitim belleği ~2GB artar, (2) SLAKE gibi küçük veri setlerinde overfitting riski yükselir, (3) CLIP'in genel visual representation'ını bozabilir. Freeze ile sadece fusion+diffusion katmanları güncelleniyor — toplam trainable parametre ~151M azalıyor.
+
+---
+
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — `decoder_nll` ve `tT_loss` loss formülünden çıkarıldı
+**Değişiklik:** `terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll + pre_answer_loss` → `terms["loss"] = terms["mse"] + terms["nll"] + pre_answer_loss`.
+
+**Neden:** `tT_loss` = `mean_flat(q_mean_variance(x_start, T)**2)` — forward process sonundaki gaussian'ın sıfıra ne kadar yakın olduğunu ölçüyor. Bu terim gereksiz kısıt koyuyor, diffusion'ın answer manifoldunu öğrenmesini zorlaştırıyor. `decoder_nll` = `_token_discrete_loss(x_start_mean, ...)` — clean embedding'den NLL. `terms["nll"]` = `_token_discrete_loss(model_out, ...)` zaten var ve denoised çıktıyı hedefliyor — bu daha doğru. decoder_nll çift sayma yapıyordu.
+
+**Risk:** `terms["nll"]` tek başına yeterince baskın olabilir. İzleme: 50k'da NLL/MSE oranı <5x kalmazsa `nll_weight` parametresi eklenecek.
+
+---
+
+### [KARAR] `diffuvqa/config.json` — `logits_mode: 2` eklendi
+**Değişiklik:** `"logits_mode": 2` config'e eklendi.
+
+**Neden:** `logits_mode=1` (dot-product) ile `denoised_fn_round` L2-NN tutarsızlığı giderildi. `logits_mode=2` L2 tabanlı logit hesaplar — `get_efficient_knn` ile aynı metrik. Sampling sırasında hangi token'ın "en yakın" olduğu konusunda eğitim/inference tutarlılığı sağlandı.
+
+---
+
+### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — REPO_URL Aliekinozcetin'e güncellendi
+**Değişiklik:** `REPO_URL = "https://github.com/panzerofthelake03/DiffuVQA.git"` → `"https://github.com/Aliekinozcetin/DiffuVQA.git"`.
+
+**Neden:** Bundan itibaren aktif geliştirme Aliekinozcetin reposunda devam edecek. Panzerofthelake reposu ara ara sync için kullanılacak.
+
+---
+
 ## 2026-05-11
 
 ### [KARAR] 100k checkpoint analizi — Mimari kriz teşhisi ve kararlar

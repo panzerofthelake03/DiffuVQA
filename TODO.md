@@ -9,6 +9,18 @@
 
 ## Tamamlanan Görevler
 
+- [x] `diffuvqa/vqa_model.py` — CLIP vision encoder freeze edildi (`requires_grad_(False)`)
+- [x] `diffuvqa/vqa_model.py` — lm_head weight tying bert/pubmedbert/roberta dallarında `word_embedding` set sonrası re-tie edildi
+- [x] `diffuvqa/vqa_model.py` — `get_logits` logits_mode=2 dalında `.view()` → `.reshape()` (non-contiguous tensor fix)
+- [x] `diffuvqa/gaussian_diffusion.py` — `decoder_nll` ve `tT_loss` loss formülünden çıkarıldı
+- [x] `diffuvqa/rounding.py` — `get_efficient_knn` içinde `.view()` → `.reshape()` (non-contiguous tensor fix)
+- [x] `shared/basic_utils.py` — `decode_token` içinde `.squeeze(-1)` → `.reshape(-1)`; `logits_mode` TransformerNetModel'e iletiliyor
+- [x] `diffuvqa/utils/logger.py` — `import wandb` kaldırıldı
+- [x] `train.py` — `import wandb`, `wandb.init()`, `wandb.config.update()` ve `WANDB_MODE` env bloğu kaldırıldı
+- [x] `diffuvqa/config.json` — `logits_mode: 2` eklendi
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — `dataset_local_imgs` path üçlemesi düzeltildi (`os.path.join(root, "imgs")` → `root`)
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — REPO_URL Aliekinozcetin reposuna güncellendi
+
 - [x] `sample_vqa_GPU.py`: Cevap embeddingleri yerine pure noise ile başlat
 - [x] `sample_vqa_GPU.py`: Image patch + answer token maskesini doğru kur
 - [x] `gaussian_diffusion.py`: Eğitimde mask repeat/pad yerine doğru hizalama (zeros prepend)

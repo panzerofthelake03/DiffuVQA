@@ -61,5 +61,6 @@
   "model": "transformer-bert",
   "mlp_ratio": 4,
   "use_noising_f": false,
-  "pre_answer_loss_weight": 0.0
+  "pre_answer_loss_weight": 0.0,
+  "logits_mode": 2
 }

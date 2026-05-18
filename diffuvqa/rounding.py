@@ -17,9 +17,9 @@ def get_knn(model_emb, text_emb, dist='cos'):
     return topk_out.values, topk_out.indices
 
 def get_efficient_knn(model_emb, text_emb):
-    emb_norm = (model_emb**2).sum(-1).view(-1, 1)
-    text_emb_t = torch.transpose(text_emb.view(-1, text_emb.size(-1)), 0, 1)
-    arr_norm = (text_emb ** 2).sum(-1).view(-1, 1)
+    emb_norm = (model_emb**2).sum(-1).reshape(-1, 1)
+    text_emb_t = torch.transpose(text_emb.reshape(-1, text_emb.size(-1)), 0, 1)
+    arr_norm = (text_emb ** 2).sum(-1).reshape(-1, 1)
     dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * torch.mm(model_emb, text_emb_t)
     dist = torch.clamp(dist, 0.0, np.inf)
     topk_out = torch.topk(-dist, k=1, dim=0)
