@@ -9,46 +9,32 @@ from diffuvqa.vqa_model import TransformerNetModel
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 class myTokenizer():
-    """
-    Load tokenizer from bert config or defined BPE vocab dict
-    """
-    ################################################
-    ### You can custome your own tokenizer here. ###
-    ################################################
     def __init__(self, args):
         if args.vocab == 'bert':
             tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
-            # save
             tokenizer.save_pretrained(args.checkpoint_path)
-            print('save tokenizer to', args.checkpoint_path)
         elif args.vocab == 'pubmedbert':
-            # Use PubMedBERT tokenizer for medical domain
             tokenizer = AutoTokenizer.from_pretrained("NeuML/pubmedbert-base-embeddings")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
-            # save
             tokenizer.save_pretrained(args.checkpoint_path)
-            print('save PubMedBERT tokenizer to', args.checkpoint_path)
         elif args.vocab == 'bio-bert':
             tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
             tokenizer.save_pretrained(args.checkpoint_path)
-            print('save BioBERT tokenizer to', args.checkpoint_path)
         elif args.vocab == 'roberta':
             tokenizer = AutoTokenizer.from_pretrained("roberta-large")
             self.tokenizer = tokenizer
             self.sep_token_id = tokenizer.sep_token_id
             self.pad_token_id = tokenizer.pad_token_id
             tokenizer.save_pretrained(args.checkpoint_path)
-            print('save RoBERTa tokenizer to', args.checkpoint_path)
-        else: 
-            # load vocab from the path
+        else:
             print('#'*30, 'load vocab from', args.vocab)
             vocab_dict = {'[START]': 0, '[END]': 1, '[UNK]':2, '[PAD]':3}
             with open(args.vocab, 'r', encoding='utf-8') as f:
@@ -92,30 +78,23 @@ class myTokenizer():
         return tokens
 
 def load_model_emb(args, tokenizer):
-    ### random emb or pre-defined embedding like glove embedding. You can customize your own init here.
     model = torch.nn.Embedding(tokenizer.vocab_size, args.hidden_dim)
     path_save = '{}/random_emb.torch'.format(args.checkpoint_path)
     path_save_ind = path_save + ".done"
 
     if os.path.exists(path_save):
-        print('reload the random embeddings', model)
         try:
             model.load_state_dict(torch.load(path_save))
         except RuntimeError as e:
             if "size mismatch" in str(e):
-                print(f"Warning: Embedding size mismatch. Reinitializing embeddings.")
-                print(f"  Current tokenizer vocab size: {tokenizer.vocab_size}")
                 torch.nn.init.normal_(model.weight)
                 torch.save(model.state_dict(), path_save)
-                print(f"  Saved new embeddings to {path_save}")
             else:
                 raise e
     else:
-        print('initializing the random embeddings', model)
         torch.nn.init.normal_(model.weight)
         torch.save(model.state_dict(), path_save)
-
-        with open(path_save, 'rb+') as f:  
+        with open(path_save, 'rb+') as f:
             os.fsync(f.fileno())
         with open(path_save_ind, "x") as _:
             pass
@@ -136,15 +115,6 @@ def load_defaults_config():
 
 
 def create_model_and_diffusion(args):
-    # model = TransformerNetModel(
-    #     input_dims=hidden_dim,
-    #     output_dims=(hidden_dim if not learn_sigma else hidden_dim*2),
-    #     hidden_t_dim=hidden_t_dim,
-    #     dropout=dropout,
-    #     config_name=config_name,
-    #     vocab_size=vocab_size,
-    #     init_pretrained=use_plm_init
-    # )
     if args.model == 'unet':
         model = UnetForDDPM(args=args)
     
@@ -152,7 +122,6 @@ def create_model_and_diffusion(args):
         model = TransformerNet(args=args)
 
     elif args.model == 'transformer-bert':
-        # Derive PLM from use_plm_init; fall back to vocab if not explicitly set
         _plm = getattr(args, 'use_plm_init', None)
         if not _plm or _plm not in ('bert', 'pubmedbert'):
             _vocab = getattr(args, 'vocab', 'bert')
@@ -212,9 +181,6 @@ def args_to_dict(args, keys):
 
 
 def str2bool(v):
-    """
-    https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
-    """
     if isinstance(v, bool):
         return v
     if v.lower() in ("yes", "true", "t", "y", "1"):

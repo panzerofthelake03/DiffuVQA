@@ -1,10 +1,6 @@
 import torch
-# bert results
-from transformers import AutoModelForCausalLM, AutoConfig, AutoTokenizer, default_data_collator, GPT2TokenizerFast
-import sys, yaml, os
-import json
-
 import numpy as np
+
 
 def get_knn(model_emb, text_emb, dist='cos'):
     if dist == 'cos':
@@ -27,50 +23,33 @@ def get_efficient_knn(model_emb, text_emb):
 
 def rounding_func(text_emb_lst, model, tokenizer, emb_scale_factor=1.0):
     decoded_out_lst = []
-    
-    model_emb = model.weight  # input_embs
-    down_proj_emb2 = None
-
+    model_emb = model.weight
     dist = 'l2'
-    
+
     for text_emb in text_emb_lst:
-        import torch
         if not isinstance(text_emb, torch.Tensor):
             text_emb = torch.tensor(text_emb)
-        # print(text_emb.shape)
         if len(text_emb.shape) > 2:
             text_emb = text_emb.view(-1, text_emb.size(-1))
-        else:
-            text_emb = text_emb
-        # get_knn returns (values, indices) where indices shape is (k, seq_len)
-        val, indices = get_knn((down_proj_emb2 if dist == 'cos' else model_emb),
-                                text_emb.to(model_emb.device), dist=dist)
-
-        # take top-1 nearest neighbour ids for each position
+        val, indices = get_knn(model_emb, text_emb.to(model_emb.device), dist=dist)
         top1_ids = indices[0].to('cpu').tolist()
 
-        # decode ids to string using tokenizer. Prefer tokenizer.decode (list of ids -> string).
         decoded = ''
         try:
-            # some tokenizers expect ints list
             decoded = tokenizer.decode(top1_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         except Exception:
             try:
                 toks = tokenizer.convert_ids_to_tokens(top1_ids)
                 decoded = tokenizer.convert_tokens_to_string(toks)
             except Exception:
-                # fallback: join token ids as strings
                 decoded = ' '.join([str(x) for x in top1_ids])
 
-        # final cleanup: strip and remove stray special token markers if any
         decoded = decoded.replace('[CLS]', '').replace('[SEP]', '').strip()
         decoded_out_lst.append(decoded)
-        
+
     return decoded_out_lst
 
 def compute_logp(args, model, x, input_ids):
-    # input_ids: bsz, seqlen,目标输出（token）的索引
-    # x: bsz, seqlen, dim
     word_emb = model.weight
     sigma = 0.1
     if args.model_arch == '1d-unet':
@@ -95,9 +74,7 @@ def get_weights(model, args):
         input_embs = model.transformer.wte
         down_proj = model.down_proj
         model_emb = down_proj(input_embs.weight)
-        print(model_emb.shape)
         model = torch.nn.Embedding(model_emb.size(0), model_emb.size(1))
-        print(args.emb_scale_factor)
         model.weight.data = model_emb * args.emb_scale_factor
 
     elif hasattr(model, 'weight'):

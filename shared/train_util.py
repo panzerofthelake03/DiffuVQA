@@ -1,6 +1,7 @@
 import copy
 import functools
 import os
+import math
 
 import blobfile as bf
 import numpy as np
@@ -80,8 +81,7 @@ class TrainLoop:
         self.master_params = self.model_params
         self.lg_loss_scale = INITIAL_LOG_LOSS_SCALE
         self.sync_cuda = th.cuda.is_available()
-
-        self.checkpoint_path = checkpoint_path  # DEBUG **
+        self.checkpoint_path = checkpoint_path
 
         self._load_and_sync_parameters()
         if self.use_fp16:
@@ -90,23 +90,15 @@ class TrainLoop:
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
         if self.resume_step:
             self._load_optimizer_state()
-            self.ema_params = [
-                self._load_ema_parameters(rate) for rate in self.ema_rate
-            ]
+            self.ema_params = [self._load_ema_parameters(rate) for rate in self.ema_rate]
         else:
-            self.ema_params = [
-                copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))
-            ]
+            self.ema_params = [copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))]
 
         if th.cuda.is_available():
             self.use_ddp = False
-            print(dist_util.dev())
         else:
             if dist.is_initialized() and dist.get_world_size() > 1:
-                logger.warn(
-                    "Distributed training requires CUDA. "
-                    "Gradients will not be synchronized properly!"
-                )
+                logger.warn("Distributed training requires CUDA. Gradients will not be synchronized properly!")
             self.use_ddp = False
 
         self.ddp_model = self.model
@@ -118,24 +110,18 @@ class TrainLoop:
         if main_checkpoint and bf.exists(main_checkpoint):
             self.resume_step = parse_resume_step_from_filename(main_checkpoint)
             logger.log(f"Loading model from checkpoint: {main_checkpoint} (step {self.resume_step})")
-            state_dict = dist_util.load_state_dict(
-                actual_model_path(main_checkpoint), map_location=dist_util.dev()
-            )
+            state_dict = dist_util.load_state_dict(actual_model_path(main_checkpoint), map_location=dist_util.dev())
             self.model.load_state_dict(state_dict, strict=False)
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.master_params)
-
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         ema_checkpoint = find_ema_checkpoint(main_checkpoint, self.resume_step, rate)
         if ema_checkpoint:
             if not dist.is_initialized() or dist.get_rank() == 0:
                 logger.log(f"loading EMA from checkpoint: {ema_checkpoint}...")
-                state_dict = dist_util.load_state_dict(
-                    actual_model_path(ema_checkpoint), map_location=dist_util.dev()
-                )
+                state_dict = dist_util.load_state_dict(actual_model_path(ema_checkpoint), map_location=dist_util.dev())
                 ema_params = self._state_dict_to_master_params(state_dict)
-
         if dist.is_initialized():
             dist_util.sync_params(ema_params)
         return ema_params
@@ -144,15 +130,10 @@ class TrainLoop:
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         if main_checkpoint in (None, '', 'none', 'None'):
             return
-        opt_checkpoint = bf.join(
-            bf.dirname(main_checkpoint),
-            f"opt{self.resume_step:06d}.pt"
-        )
+        opt_checkpoint = bf.join(bf.dirname(main_checkpoint), f"opt{self.resume_step:06d}.pt")
         if bf.exists(opt_checkpoint):
             logger.log(f"Loading optimizer state from: {opt_checkpoint}")
-            state_dict = dist_util.load_state_dict(
-                actual_model_path(opt_checkpoint), map_location=dist_util.dev()
-            )
+            state_dict = dist_util.load_state_dict(actual_model_path(opt_checkpoint), map_location=dist_util.dev())
             self.opt.load_state_dict(state_dict)
         else:
             logger.log(f"No optimizer state found at {opt_checkpoint} — starting with fresh optimizer")
@@ -162,37 +143,12 @@ class TrainLoop:
         self.model.convert_to_fp16()
 
     def run_loop(self, config):
-        # while (
-        #     not self.learning_steps
-        #     or self.step + self.resume_step < self.learning_steps
-        # ):
-        #     image, cond = next(self.data)
-        #     self.run_step(image, cond)
-        #     if self.step % self.log_interval == 0:
-        #         logger.dumpkvs()
-        #     if self.eval_data is not None and self.step % self.eval_interval == 0:
-        #         batch_eval, cond_eval = next(self.eval_data)
-        #         self.forward_only(batch_eval, cond_eval)
-        #         print('eval on validation set')
-        #         logger.dumpkvs()
-        #     if self.step > 0 and self.step % self.save_interval == 0:
-        #         self.save()
-        #         # Run for a finite amount of time in integration tests.
-        #         if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
-        #             return
-        #     self.step += 1
-        #     print(self.step)
-        # Run for a total number of steps given by self.learning_steps.
-        # This treats `--learning_steps` as the total optimizer steps the user
-        # expects (not the number of epochs). We iterate through the dataset
-        # and stop once the requested number of steps is reached.
         data_iter = iter(self.data)
         eval_iter = iter(self.eval_data) if self.eval_data is not None else None
         from tqdm import tqdm
 
         remaining = self.learning_steps - self.resume_step
-        pbar = tqdm(total=remaining, desc="Training", unit="step",
-                   dynamic_ncols=True, smoothing=0.1)
+        pbar = tqdm(total=remaining, desc="Training", unit="step", dynamic_ncols=True, smoothing=0.1)
         pbar.update(self.step)
 
         while (not self.learning_steps) or (self.step + self.resume_step < self.learning_steps):
@@ -205,11 +161,11 @@ class TrainLoop:
             self.run_step(image, cond)
 
             if 'loss' in logger.get_current().name2val:
-                avg_loss = float(logger.get_current().name2val['loss'])
-                pbar.set_postfix({'loss': f'{avg_loss:.4f}'}, refresh=False)
+                pbar.set_postfix({'loss': f"{float(logger.get_current().name2val['loss']):.4f}"}, refresh=False)
 
             if self.step % self.log_interval == 0:
                 logger.dumpkvs()
+
             if eval_iter is not None and self.step > 0 and self.step % self.eval_interval == 0:
                 try:
                     batch_eval, cond_eval = next(eval_iter)
@@ -219,18 +175,18 @@ class TrainLoop:
                 self.forward_only(batch_eval, cond_eval)
                 pbar.write(f'Step {self.step}: eval loss logged')
                 logger.dumpkvs()
+
             if self.step > 0 and self.step % self.save_interval == 0:
                 self.save()
-                pbar.write(f'💾 Step {self.step}: Checkpoint saved')
-                # Run for a finite amount of time in integration tests.
+                pbar.write(f'Step {self.step}: checkpoint saved')
                 if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                     pbar.close()
                     return
+
             self.step += 1
             pbar.update(1)
 
         pbar.close()
-        # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:
             self.save()
 
@@ -255,15 +211,10 @@ class TrainLoop:
                 t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
                 compute_losses = functools.partial(
                     self.diffusion.training_losses,
-                    self.ddp_model,
-                    micro_image,
-                    t,
-                    model_kwargs=micro_cond,
+                    self.ddp_model, micro_image, t, model_kwargs=micro_cond,
                 )
                 losses = compute_losses()
-                log_loss_dict(
-                    self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()}
-                )
+                log_loss_dict(self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()})
 
     def forward_backward(self, image, cond):
         zero_grad(self.model_params)
@@ -278,26 +229,18 @@ class TrainLoop:
             t, weights = self.schedule_sampler.sample(micro_image.shape[0], dist_util.dev())
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
-                self.ddp_model,
-                micro_image,
-                t,
-                model_kwargs=micro_cond,
+                self.ddp_model, micro_image, t, model_kwargs=micro_cond,
             )
             losses = compute_losses()
 
             if isinstance(self.schedule_sampler, LossAwareSampler):
-                self.schedule_sampler.update_with_local_losses(
-                    t, losses["loss"].detach()
-                )
+                self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
 
-            # Scale loss by microbatch count so gradients accumulate correctly
             loss = (losses["loss"] * weights).mean() / num_microbatches
-            log_loss_dict(
-                self.diffusion, t, {k: v * weights for k, v in losses.items()}
-            )
+            log_loss_dict(self.diffusion, t, {k: v * weights for k, v in losses.items()})
+
             if self.use_fp16:
-                loss_scale = 2 ** self.lg_loss_scale
-                (loss * loss_scale).backward()
+                (loss * 2 ** self.lg_loss_scale).backward()
             else:
                 loss.backward()
 
@@ -306,7 +249,6 @@ class TrainLoop:
             self.lg_loss_scale -= 1
             logger.log(f"Found NaN, decreased lg_loss_scale to {self.lg_loss_scale}")
             return
-
         model_grads_to_master_grads(self.model_params, self.master_params)
         self.master_params[0].grad.mul_(1.0 / (2 ** self.lg_loss_scale))
         self._log_grad_norm()
@@ -318,22 +260,11 @@ class TrainLoop:
         self.lg_loss_scale += self.fp16_scale_growth
 
     def grad_clip(self):
-        # print('doing gradient clipping')
-        max_grad_norm = self.gradient_clipping  #3.0
+        max_grad_norm = self.gradient_clipping
         if hasattr(self.opt, "clip_grad_norm"):
-            # Some optimizers (like the sharded optimizer) have a specific way to do gradient clipping
             self.opt.clip_grad_norm(max_grad_norm)
-        # else:
-        #     assert False
-        # elif hasattr(self.model, "clip_grad_norm_"):
-        #     # Some models (like FullyShardedDDP) have a specific way to do gradient clipping
-        #     self.model.clip_grad_norm_(args.max_grad_norm)
         else:
-            # Revert to normal clipping otherwise, handling Apex or full precision
-            th.nn.utils.clip_grad_norm_(
-                self.model.parameters(),  #amp.master_params(self.opt) if self.use_apex else
-                max_grad_norm,
-            )
+            th.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
 
     def optimize_normal(self):
         if self.gradient_clipping > 0:
@@ -346,19 +277,14 @@ class TrainLoop:
 
     def _log_grad_norm(self):
         sqsum = 0.0
-        # cnt = 0
         for p in self.master_params:
-            # print(cnt, p) ## DEBUG
-            # print(cnt, p.grad)
-            # cnt += 1
-            if p.grad != None:
+            if p.grad is not None:
                 sqsum += (p.grad ** 2).sum().item()
         logger.logkv_mean("grad_norm", np.sqrt(sqsum))
 
     def _anneal_lr(self):
         if not self.learning_steps:
             return
-        import math
         warmup_frac = 0.03
         lr_min = self.lr * 0.05
         frac_done = (self.step + self.resume_step) / self.learning_steps
@@ -373,11 +299,10 @@ class TrainLoop:
             param_group["lr"] = lr
 
     def _ema_rate(self, target_rate):
-        # Warmup EMA: ramp from 0.9 to target_rate over first 10k steps so
-        # early random-init weights don't pollute the EMA shadow copy.
+        # Ramp EMA from low to target over first 10k steps to avoid polluting
+        # the shadow copy with random-init weights.
         step = self.step + self.resume_step
-        warmup_steps = 10000
-        if step < warmup_steps:
+        if step < 10000:
             return min(target_rate, 1 - (1 / (step + 1)))
         return target_rate
 
@@ -387,39 +312,26 @@ class TrainLoop:
         if self.use_fp16:
             logger.logkv("lg_loss_scale", self.lg_loss_scale)
 
-    
     def save(self):
         def save_checkpoint(rate, params):
             state_dict = self._master_params_to_state_dict(params)
-            logger.log(f"saving model {rate}...")
             if not rate:
                 filename = f"model{(self.step + self.resume_step):06d}.pt"
             else:
                 filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
-            print('writing to', bf.join(get_blob_logdir(), filename))
-            print('writing to', bf.join(self.checkpoint_path, filename))
-            # with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
-            #     th.save(state_dict, f)
-            with bf.BlobFile(bf.join(self.checkpoint_path, filename), "wb") as f:  # DEBUG **
-                th.save(state_dict, f)  # save locally
-                # pass # save empty
+            with bf.BlobFile(bf.join(self.checkpoint_path, filename), "wb") as f:
+                th.save(state_dict, f)
 
-        # save_checkpoint(0, self.master_params)
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
 
-        # Save optimizer state alongside model checkpoint
         opt_filename = f"opt{(self.step + self.resume_step):06d}.pt"
-        opt_path = bf.join(self.checkpoint_path, opt_filename)
-        logger.log(f"saving optimizer state to {opt_path}...")
-        with bf.BlobFile(opt_path, "wb") as f:
+        with bf.BlobFile(bf.join(self.checkpoint_path, opt_filename), "wb") as f:
             th.save(self.opt.state_dict(), f)
 
     def _master_params_to_state_dict(self, master_params):
         if self.use_fp16:
-            master_params = unflatten_master_params(
-                list(self.model.parameters()), master_params  # DEBUG **
-            )
+            master_params = unflatten_master_params(list(self.model.parameters()), master_params)
         state_dict = self.model.state_dict()
         for i, (name, _value) in enumerate(self.model.named_parameters()):
             assert name in state_dict
@@ -430,20 +342,13 @@ class TrainLoop:
         params = [state_dict[name] for name, _ in self.model.named_parameters()]
         if self.use_fp16:
             return make_master_params(params)
-        else:
-            return params
+        return params
 
 
 def parse_resume_step_from_filename(filename):
-    """
-    Parse filenames of the form path/to/ema_RATE_NNNNNN.pt or modelNNNNNN.pt.
-    """
     import re
-    basename = os.path.basename(filename)
-    m = re.search(r'(\d{6})\.pt$', basename)
-    if m:
-        return int(m.group(1))
-    return 0
+    m = re.search(r'(\d{6})\.pt$', os.path.basename(filename))
+    return int(m.group(1)) if m else 0
 
 
 def get_blob_logdir():
@@ -451,25 +356,19 @@ def get_blob_logdir():
 
 
 def find_resume_checkpoint():
-    # On your infrastructure, you may want to override this to automatically
-    # discover the latest checkpoint on your blob storage, etc.
     return None
 
 
 def find_ema_checkpoint(main_checkpoint, step, rate):
     if main_checkpoint is None:
         return None
-    filename = f"ema_{rate}_{(step):06d}.pt"
-    path = bf.join(bf.dirname(main_checkpoint), filename)
-    if bf.exists(path):
-        return path
-    return None
+    path = bf.join(bf.dirname(main_checkpoint), f"ema_{rate}_{step:06d}.pt")
+    return path if bf.exists(path) else None
 
 
 def log_loss_dict(diffusion, ts, losses):
     for key, values in losses.items():
         logger.logkv_mean(key, values.mean().item())
-        # Log the quantiles (four quartiles, in particular).
         for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
             quartile = int(4 * sub_t / diffusion.num_timesteps)
             logger.logkv_mean(f"{key}_q{quartile}", sub_loss)

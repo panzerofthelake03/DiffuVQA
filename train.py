@@ -1,6 +1,3 @@
-"""
-Train a diffusion model on images.
-"""
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 import time
@@ -21,36 +18,34 @@ from shared.basic_utils import (
 )
 from shared.train_util import TrainLoop
 from transformers import set_seed
-
 import sys
-import os
 from torchvision import transforms
 from shared.excel_export_module import DiffuVQAExcelExporter
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-
-sys.path.append(current_dir)
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
 def create_argparser():
     defaults = dict()
     defaults.update(load_defaults_config())
     parser = argparse.ArgumentParser()
-    add_dict_to_argparser(parser, defaults) # update latest args according to argparse
+    add_dict_to_argparser(parser, defaults)
     return parser
+
 
 def main():
     args, unknown = create_argparser().parse_known_args()
     if unknown:
         print(f"[WARNING] Unrecognized arguments (ignored): {unknown}")
     set_seed(args.seed)
-    
-    # dist_util.setup_dist()
+
     os.makedirs(args.checkpoint_path, exist_ok=True)
     is_resume = args.resume_checkpoint not in (None, '', 'none', 'None')
     logger.configure(dir=args.checkpoint_path, format_strs=["log", "csv"], append=is_resume)
+
     logger.log("### Creating data loader...")
     start_t = time.time()
+
     tokenizer = load_tokenizer(args)
     model_weight, tokenizer = load_model_emb(args, tokenizer)
     transform = transforms.Compose([
@@ -59,36 +54,32 @@ def main():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    data = load_data_vqa(batch_size=args.batch_size, seq_len=args.seq_len, args=args, model_emb=model_weight,
-                         transform=transform, split="train", loaded_vocab=tokenizer)
+    data = load_data_vqa(batch_size=args.batch_size, seq_len=args.seq_len, args=args,
+                         model_emb=model_weight, transform=transform, split="train",
+                         loaded_vocab=tokenizer)
+    data_valid = None
     if args.valid:
-        data_valid = load_data_vqa(batch_size=args.batch_size, seq_len=args.seq_len, args=args, model_emb=model_weight,
-                               transform=transform, split='valid', loaded_vocab=tokenizer)
-    else:
-        data_valid = None
+        data_valid = load_data_vqa(batch_size=args.batch_size, seq_len=args.seq_len, args=args,
+                                   model_emb=model_weight, transform=transform, split='valid',
+                                   loaded_vocab=tokenizer)
 
-
-    logger.log(f"{'#'*30} size of vocab {args.vocab_size}")
-
+    logger.log(f"{'#'*30} vocab size {args.vocab_size}")
     logger.log("### Creating model and diffusion...")
-    logger.log(f"use{args.model}")
-    # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
+    logger.log(f"model: {args.model}")
+
     model, diffusion = create_model_and_diffusion(args=args)
-    # print('#'*30, 'cuda', dist_util.dev())
 
     if torch.cuda.device_count() > 1:
         logger.log(f"Using {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
 
-    model.to(dist_util.dev()) #  DEBUG **
-    # model.cuda() #  DEBUG **
+    model.to(dist_util.dev())
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
+    logger.log(f'### Parameter count: {pytorch_total_params}')
 
-    logger.log(f'### The parameter count is {pytorch_total_params}')
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
-    logger.log(f'### Saving the hyperparameters to {args.checkpoint_path}/training_args.json')
     with open(f'{args.checkpoint_path}/training_args.json', 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
@@ -116,14 +107,10 @@ def main():
         eval_interval=args.eval_interval
     ).run_loop(args)
 
-    # Calculate total training time and average time per step
-    total_training_time =  time.time() - start_t  # Replace with actual calculation
+    total_training_time = time.time() - start_t
     avg_time_per_step = total_training_time / args.learning_steps if args.learning_steps > 0 else 0
+    hardware_info = f"GPUs: {torch.cuda.device_count()}, CUDA: {torch.version.cuda}, PyTorch: {torch.__version__}"
 
-    # Gather hardware information
-    hardware_info = f"GPUs: {torch.cuda.device_count()}, CUDA Version: {torch.version.cuda}, PyTorch Version: {torch.__version__}"
-
-    # Export training logs
     exporter = DiffuVQAExcelExporter()
     exporter.export_training_logs(
         log_dir=args.checkpoint_path,
@@ -136,6 +123,7 @@ def main():
         total_learning_steps=args.learning_steps,
         hardware_info=hardware_info
     )
+
 
 if __name__ == "__main__":
     main()
