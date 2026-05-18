@@ -112,10 +112,20 @@ class JSONOutputFormat(KVWriter):
 
 
 class CSVOutputFormat(KVWriter):
-    def __init__(self, filename):
-        self.file = open(filename, "w+t")
+    def __init__(self, filename, append=False):
+        mode = "a+t" if append else "w+t"
+        self.file = open(filename, mode)
         self.keys = []
         self.sep = ","
+        # When appending, read existing keys from the header row
+        if append and self.file.tell() == 0:
+            pass  # file is empty, nothing to read
+        elif append:
+            self.file.seek(0)
+            header = self.file.readline().strip()
+            if header:
+                self.keys = header.split(",")
+            self.file.seek(0, 2)  # seek to end
 
     def writekvs(self, kvs):
         # Add our current row to the history
@@ -189,7 +199,7 @@ class TensorBoardOutputFormat(KVWriter):
             self.writer = None
 
 
-def make_output_format(format, ev_dir, log_suffix=""):
+def make_output_format(format, ev_dir, log_suffix="", append=False):
     os.makedirs(ev_dir, exist_ok=True)
     if format == "stdout":
         return HumanOutputFormat(sys.stdout)
@@ -198,7 +208,7 @@ def make_output_format(format, ev_dir, log_suffix=""):
     elif format == "json":
         return JSONOutputFormat(osp.join(ev_dir, "progress%s.json" % log_suffix))
     elif format == "csv":
-        return CSVOutputFormat(osp.join(ev_dir, "progress%s.csv" % log_suffix))
+        return CSVOutputFormat(osp.join(ev_dir, "progress%s.csv" % log_suffix), append=append)
     elif format == "tensorboard":
         return TensorBoardOutputFormat(osp.join(ev_dir, "tb%s" % log_suffix))
     else:
@@ -440,9 +450,11 @@ def mpi_weighted_mean(comm, local_name2valcount):
         return {}
 
 
-def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
+def configure(dir=None, format_strs=None, comm=None, log_suffix="", append=False):
     """
-    If comm is provided, average all numerical stats across that comm
+    If comm is provided, average all numerical stats across that comm.
+    append=True: resume existing progress.csv (used when resuming from checkpoint).
+    append=False: start fresh progress.csv (used for new training runs).
     """
     if dir is None:
         dir = os.getenv("OPENAI_LOGDIR")
@@ -465,7 +477,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
         else:
             format_strs = os.getenv("OPENAI_LOG_FORMAT_MPI", "log").split(",")
     format_strs = filter(None, format_strs)
-    output_formats = [make_output_format(f, dir, log_suffix) for f in format_strs]
+    output_formats = [make_output_format(f, dir, log_suffix, append=append) for f in format_strs]
 
     Logger.CURRENT = Logger(dir=dir, output_formats=output_formats, comm=comm)
     if output_formats:

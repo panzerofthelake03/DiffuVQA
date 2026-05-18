@@ -52,7 +52,8 @@ def main():
     
     # dist_util.setup_dist()
     os.makedirs(args.checkpoint_path, exist_ok=True)
-    logger.configure(dir=args.checkpoint_path, format_strs=["log", "csv"])
+    is_resume = args.resume_checkpoint not in (None, '', 'none', 'None')
+    logger.configure(dir=args.checkpoint_path, format_strs=["log", "csv"], append=is_resume)
     logger.log("### Creating data loader...")
     start_t = time.time()
     tokenizer = load_tokenizer(args)
