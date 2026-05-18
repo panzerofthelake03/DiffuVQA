@@ -103,10 +103,11 @@ python eval/eval_DiffuVQA.py --folder outputs --mbr
 ### Diffusion Configuration
 
 Default config in `diffuvqa/config.json`:
-- `diff_steps: 2500`, `noise_schedule: sqrt`
+- `diffusion_steps: 2500`, `noise_schedule: sqrt` (Bert branch eğitiminde `--diffusion_steps 2000` override ediliyor)
 - `schedule_sampler: lossaware` (importance sampling of timesteps via `diffuvqa/step_sample.py`)
 - `hidden_dim: 768`, `seq_len: 32`
 - `lr: 1e-5`, `batch_size: 20`, `learning_steps: 500000`
+- `use_noising_f: false`, `pre_answer_loss_weight: 0.0`, `logits_mode: 2`
 
 ### Supported Vocab Options
 

@@ -5,6 +5,26 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+## 2026-05-19
+
+### [KARAR] Tüm codebase yorum temizliği yapıldı
+**Değişiklik:** 10 dosyada gereksiz, açıklayıcı olmayan, debug amaçlı ve Türkçe/Çince inline yorumlar kaldırıldı. Toplam 1100+ satır silindi.
+
+**Etkilenen dosyalar:** `gaussian_diffusion.py`, `sample_vqa_GPU.py`, `shared/basic_utils.py`, `diffuvqa/rounding.py`, `diffuvqa/vqa_datasets.py`, `diffuvqa/step_sample.py`, `diffuvqa/vqa_model.py`, `shared/train_util.py`, `train.py`.
+
+**Kaldırılanlar:** Debug `print()` çağrıları, Türkçe/Çince inline yorumlar, `# ---` section bannerları, obvious docstring'ler, commentted-out dead code blokları (betas/alphas hesabı, `betas_for_alpha_bar` fonksiyonu, `__main__` test bloğu, `dist.all_gather` bloğu).
+
+**Korunanlar:** Mimarinin neden öyle yapıldığını açıklayan yorumlar (non-contiguous tensor notu, EMA warmup formülü, mask semantiği).
+
+---
+
+### [KARAR] `notebooks/run_diffuvqa_colab.ipynb` — Tam temizlik
+**Değişiklik:** Notebook 1463 satır küçüldü. Emoji (`📂`, `✅`, `⚠️`, `💡`), verbose print başlıkları, `# opsiyonel` ipucu satırları, gereksiz inline yorum blokları kaldırıldı. `vqa_datasets` test hücresi (dead code) silindi.
+
+**Ek düzeltme:** `dataset_local_imgs` path üçlemesi (`SLAKE/imgs/imgs`) kaldırıldı — `IMAGEFOLDER_NAME = "SLAKE/imgs"` zaten tam yolu içerdiğinden ek `"imgs"` append'i gereksizdi. Kök neden: `DATASET_IMG_PATHS` listesindeki ekstra `"imgs"` candidate.
+
+---
+
 ## 2026-05-18
 
 ### [KARAR] `diffuvqa/vqa_model.py` — `get_logits` `.view()` → `.reshape()`

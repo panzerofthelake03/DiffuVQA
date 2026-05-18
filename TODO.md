@@ -2,7 +2,7 @@
 
 ## Aktif Görevler
 
-- [ ] Bert 200k eğitimi tamamlanınca (her 5k'da) sampling yap ve sonuçları değerlendir
+- [ ] Bert 200k eğitimi tamamlanınca (her 5k'da) sampling yap ve sonuçları değerlendir — ilk sample 10k'da
 - [ ] 200k sonrası sampling sweep: `(decode_top_k=5, min_answer_tokens=2, conf=0.25)`, `(5, 2, 0.20)`, `(7, 2, 0.20)` kombinasyonlarını dene
 - [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
 - [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (200k sonrası)
@@ -81,3 +81,5 @@
 - [x] `diffuvqa/config.json` — `use_noising_f` ve `pre_answer_loss_weight` bayrakları eklendi
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — 200k eğitim config güncellendi (LEARNING_STEPS=200000, SAVE_INTERVAL=5000, RESUME_CHECKPOINT=None)
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Training hücresi `--use_noising_f` ve `--pre_answer_loss_weight` argümanları eklendi
+- [x] Tüm codebase yorum temizliği — `gaussian_diffusion.py`, `sample_vqa_GPU.py`, `shared/basic_utils.py`, `diffuvqa/rounding.py`, `diffuvqa/vqa_datasets.py`, `diffuvqa/step_sample.py`, `diffuvqa/vqa_model.py`, `shared/train_util.py`, `train.py` (1100+ satır gereksiz yorum/dead code silindi)
+- [x] `notebooks/run_diffuvqa_colab.ipynb` — Notebook tam temizliği: emoji, debug print, gereksiz yorum kaldırıldı; `imgs/imgs` path tripling düzeltildi; dead cell (`vqa_datasets` test) silindi (1463 satır silindi)
