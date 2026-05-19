@@ -80,6 +80,8 @@ class feature_fusion(nn.Module):
         self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
         self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
+        for param in self.vision_encoder.parameters():
+            param.requires_grad_(False)
 
         # Dynamically determine the channel dimension produced by the vision encoder
         # by running a single dummy forward pass. This avoids the hardcoded 145 and

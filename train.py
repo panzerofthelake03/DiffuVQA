@@ -21,7 +21,6 @@ from shared.basic_utils import (
 )
 from shared.train_util import TrainLoop
 from transformers import set_seed
-import wandb
 
 import sys
 import os
@@ -31,10 +30,6 @@ from shared.excel_export_module import DiffuVQAExcelExporter
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.append(current_dir)
-
-### custom your wandb setting here ###
-# os.environ["WANDB_API_KEY"] = ""
-os.environ["WANDB_MODE"] = "offline"
 
 
 def create_argparser():
@@ -50,7 +45,8 @@ def main():
     
     # dist_util.setup_dist()
     os.makedirs(args.checkpoint_path, exist_ok=True)
-    logger.configure(dir=args.checkpoint_path, format_strs=["log", "csv"])
+    is_resume = args.resume_checkpoint not in [None, "none", ""]
+    logger.configure(dir=args.checkpoint_path, format_strs=["log", "csv"], append=is_resume)
     logger.log("### Creating data loader...")
     start_t = time.time()
     tokenizer = load_tokenizer(args)
@@ -95,13 +91,6 @@ def main():
     with open(f'{args.checkpoint_path}/training_args.json', 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
-    if ('LOCAL_RANK' not in os.environ) or (int(os.environ['LOCAL_RANK']) == 0):
-        wandb.init(
-            project=os.getenv("WANDB_PROJECT", "DiffuVQA"),
-            name=args.checkpoint_path,
-        )
-        wandb.config.update(args.__dict__, allow_val_change=True)
- 
     logger.log("### Training...")
 
     TrainLoop(

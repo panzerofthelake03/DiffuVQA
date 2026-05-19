@@ -14,7 +14,6 @@ import tempfile
 import warnings
 from collections import defaultdict
 from contextlib import contextmanager
-import wandb
 
 DEBUG = 10
 INFO = 20
@@ -35,9 +34,10 @@ class SeqWriter(object):
 
 
 class HumanOutputFormat(KVWriter, SeqWriter):
-    def __init__(self, filename_or_file):
+    def __init__(self, filename_or_file, append=False):
         if isinstance(filename_or_file, str):
-            self.file = open(filename_or_file, "wt")
+            mode = "at" if append and osp.exists(filename_or_file) else "wt"
+            self.file = open(filename_or_file, mode)
             self.own_file = True
         else:
             assert hasattr(filename_or_file, "read"), (
@@ -112,10 +112,17 @@ class JSONOutputFormat(KVWriter):
 
 
 class CSVOutputFormat(KVWriter):
-    def __init__(self, filename):
-        self.file = open(filename, "w+t")
+    def __init__(self, filename, append=False):
         self.keys = []
         self.sep = ","
+        if append and osp.exists(filename):
+            self.file = open(filename, "r+t")
+            header = self.file.readline().rstrip("\n")
+            if header:
+                self.keys = header.split(",")
+            self.file.seek(0, 2)  # seek to end
+        else:
+            self.file = open(filename, "w+t")
 
     def writekvs(self, kvs):
         # Add our current row to the history
@@ -189,16 +196,16 @@ class TensorBoardOutputFormat(KVWriter):
             self.writer = None
 
 
-def make_output_format(format, ev_dir, log_suffix=""):
+def make_output_format(format, ev_dir, log_suffix="", append=False):
     os.makedirs(ev_dir, exist_ok=True)
     if format == "stdout":
         return HumanOutputFormat(sys.stdout)
     elif format == "log":
-        return HumanOutputFormat(osp.join(ev_dir, "log%s.txt" % log_suffix))
+        return HumanOutputFormat(osp.join(ev_dir, "log%s.txt" % log_suffix), append=append)
     elif format == "json":
         return JSONOutputFormat(osp.join(ev_dir, "progress%s.json" % log_suffix))
     elif format == "csv":
-        return CSVOutputFormat(osp.join(ev_dir, "progress%s.csv" % log_suffix))
+        return CSVOutputFormat(osp.join(ev_dir, "progress%s.csv" % log_suffix), append=append)
     elif format == "tensorboard":
         return TensorBoardOutputFormat(osp.join(ev_dir, "tb%s" % log_suffix))
     else:
@@ -440,9 +447,10 @@ def mpi_weighted_mean(comm, local_name2valcount):
         return {}
 
 
-def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
+def configure(dir=None, format_strs=None, comm=None, log_suffix="", append=False):
     """
-    If comm is provided, average all numerical stats across that comm
+    If comm is provided, average all numerical stats across that comm.
+    Pass append=True when resuming a run to preserve existing log files.
     """
     if dir is None:
         dir = os.getenv("OPENAI_LOGDIR")
@@ -465,7 +473,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
         else:
             format_strs = os.getenv("OPENAI_LOG_FORMAT_MPI", "log").split(",")
     format_strs = filter(None, format_strs)
-    output_formats = [make_output_format(f, dir, log_suffix) for f in format_strs]
+    output_formats = [make_output_format(f, dir, log_suffix, append=append) for f in format_strs]
 
     Logger.CURRENT = Logger(dir=dir, output_formats=output_formats, comm=comm)
     if output_formats:

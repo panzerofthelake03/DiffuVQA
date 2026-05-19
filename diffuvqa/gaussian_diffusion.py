@@ -724,12 +724,6 @@ class GaussianDiffusion:
         t0_loss = (t0_per_token * ans_len_mask).sum(dim=-1) / mse_den
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
 
-        # tT_loss: at the last timestep pure noise should have near-zero mean
-        out_mean, _, _ = self.q_mean_variance(x_start_mean, th.LongTensor([self.num_timesteps - 1]).to(x_start_mean.device))
-        tT_loss = mean_flat(out_mean ** 2)
-
-        # decoder_nll: regularize predicted answer embeddings toward vocabulary tokens
-        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a, mask=ans_len_mask)
         terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a, mask=ans_len_mask)
 
         if pre_answer_loss_weight > 0:
@@ -744,7 +738,7 @@ class GaussianDiffusion:
         else:
             pre_answer_loss = th.zeros_like(terms["mse"])
 
-        terms["loss"] = terms["mse"] + tT_loss + terms["nll"] + decoder_nll + pre_answer_loss
+        terms["loss"] = terms["mse"] + terms["nll"] + pre_answer_loss
 
         return terms
 
