@@ -67,8 +67,6 @@ class feature_fusion(nn.Module):
 
         self.language_encoder = language_encoder
         self.bert = bert
-        for p in self.bert.encoder.parameters():
-            p.requires_grad_(False)
         # Cache embedding submodules — parent deletes temp_bert.embeddings after init.
         self.position_embeddings = bert.embeddings.position_embeddings
         self.token_type_embeddings = bert.embeddings.token_type_embeddings
