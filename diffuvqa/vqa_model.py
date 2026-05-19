@@ -71,6 +71,9 @@ class feature_fusion(nn.Module):
 
         self.language_encoder = language_encoder
         self.bert = bert
+        for layer in self.bert.encoder.layer:
+            for param in layer.parameters():
+                param.requires_grad_(False)
         # Cache embedding submodules because the parent model deletes
         # `temp_bert.embeddings` after initialization to save memory.
         self.position_embeddings = bert.embeddings.position_embeddings
