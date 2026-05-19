@@ -81,6 +81,9 @@ class feature_fusion(nn.Module):
         for param in self.vision_encoder.parameters():
             param.requires_grad_(False)
 
+        for param in self.bert.encoder.layer.parameters():
+            param.requires_grad_(False)
+
         # Probe vision output channels once so image_MLP input matches the selected backbone.
         with torch.no_grad():
             dummy_image = torch.zeros(1, 3, args.image_resolution, args.image_resolution)
