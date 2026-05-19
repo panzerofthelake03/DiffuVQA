@@ -78,6 +78,8 @@ class feature_fusion(nn.Module):
         self.modality_type_embeddings = nn.Embedding(2, args.hidden_dim)
         self.modality_type_embeddings.apply(self.init_weights)
         self.vision_encoder = build_model(args.image_encoder, resolution_after=args.image_resolution)
+        for param in self.vision_encoder.parameters():
+            param.requires_grad_(False)
 
         # Probe vision output channels once so image_MLP input matches the selected backbone.
         with torch.no_grad():

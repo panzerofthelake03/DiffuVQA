@@ -757,34 +757,23 @@ class GaussianDiffusion:
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
         # terms["mse"] = terms["x_mse"] + terms["cond_mse"]
         # tT_mask = (t == self.num_timesteps - 1)
-        out_mean, _, _ = self.q_mean_variance(
-            x_start_mean,
-            th.LongTensor([self.num_timesteps - 1]).to(x_start_mean.device),
-        )
-        tT_loss = mean_flat(out_mean ** 2)
-
-        decoder_nll = self._token_discrete_loss(x_start_mean, get_logits, input_ids_a, mask=ans_len_mask)
-
         # The model predicts the concatenated conditional+target sequence. Extract
         # the predicted target portion using the target sequence length rather
         # than assuming it's exactly half of the total length.
-        # Determine target length from x_start_mean (clean answer embeddings).
         target_len = x_start_mean.size(1)
         total_len = cond_model_out_x_start.size(1)
         if target_len > total_len:
             raise RuntimeError(f"Unexpected sizes: target_len={target_len} > total_len={total_len}")
         start_idx = total_len - target_len
-        # Debug print to verify slicing indices when DVQA_DEBUG=1
         try:
             if os.environ.get('DVQA_DEBUG', '0') == '1':
                 logger.log(f"DEBUG extracting model_out_x_start: total_len={total_len}, target_len={target_len}, start_idx={start_idx}")
         except Exception:
             pass
         model_out_x_start = cond_model_out_x_start[:, start_idx:, :]
-        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a, mask=ans_len_mask)  # x_0->model_out_x_start
-        # assert (model.lm_head.weight == model.word_embedding.weight).all()
+        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_a, mask=ans_len_mask)
 
-        terms["loss"] = terms["mse"] + tT_loss + pre_answer_loss + terms["nll"] + decoder_nll
+        terms["loss"] = terms["mse"] + pre_answer_loss + terms["nll"]
 
         return terms
 
