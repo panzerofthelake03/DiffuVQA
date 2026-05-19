@@ -262,7 +262,8 @@ def main():
             sample_flat = sample.contiguous().view(-1, sample.size(-1))
             val, idx_nn = get_efficient_knn(model_emb.weight.to(sample.device), sample_flat)
             val = val.view(sample.size(0), sample.size(1))
-            avg_nn_dist = (-val).mean(dim=1)
+            # val = -squared_L2; take sqrt to get true L2 distance
+            avg_nn_dist = (-val).clamp(min=0.0).sqrt().mean(dim=1)
         except Exception:
             avg_nn_dist = th.zeros(sample.size(0), device=sample.device)
 
