@@ -434,7 +434,7 @@ class GaussianDiffusion:
     def training_losses_seq2seq(self, model, image, t, model_kwargs=None, noise=None):
         """
         Training loss for one timestep.
-        loss = MSE(ans_emb, denoised_ans) + NLL(denoised_ans → vocab) + pre_answer_loss (optional)
+        loss = MSE(ans_emb, denoised_ans) + NLL(denoised_ans → vocab) + decoder_nll(x_start_mean → vocab) + pre_answer_loss (optional)
         """
         assert 'input_ids' in model_kwargs
         input_ids_x = model_kwargs.pop('input_ids').to(t.device)
@@ -533,7 +533,7 @@ class GaussianDiffusion:
         else:
             pre_answer_loss = th.zeros_like(terms["mse"])
 
-        terms["loss"] = terms["mse"] + terms["nll"] + pre_answer_loss
+        terms["loss"] = terms["mse"] + terms["nll"] + decoder_nll + pre_answer_loss
         terms["loss"] = th.nan_to_num(terms["loss"], nan=0.0, posinf=100.0, neginf=0.0)
 
         return terms
