@@ -28,25 +28,6 @@
 
 \begin{document}
 \maketitle
-\tableofcontents
-\newpage
-
-% ─────────────────────────────────────────────
-\section{Proje Özeti}
-% ─────────────────────────────────────────────
-
-DiffuVQA, tıbbi görsel soru cevaplama (Med-VQA) görevini sınıflandırma değil \textbf{koşullu metin üretimi} olarak ele alan bir mimaridir. Ters difüzyon süreci hem tıbbi görüntü hem de soru üzerine koşullandırılarak açık uçlu cevaplar üretilmektedir.
-
-\subsection*{Temel Fikir}
-
-Geleneksel Med-VQA sistemleri cevabı kapalı bir sınıf kümesinden seçer. DiffuVQA ise cevabı gürültülü bir başlangıç noktasından başlayarak difüzyon adımlarıyla üretir: model $q(\mathbf{x}_T | \mathbf{x}_0)$ ileri süreçten öğrenerek $p_\theta(\mathbf{x}_{t-1} | \mathbf{x}_t, \mathbf{c})$ ters sürecini görüntü ve soru koşulu $\mathbf{c}$ ile tahmin eder.
-
-\subsection*{Veri Seti}
-
-\begin{itemize}
-    \item \textbf{SLAKE} (Structured Language-Knowledge Embedding): 14K eğitim örneği, İngilizce/Çince Tıbbi görüntü + Soru + Cevap üçlüsü. Ortalama cevap uzunluğu \textbf{1.5 token} (çok kısa).
-    \item Veri seti küçüklüğü ve kısa cevap yapısı birçok mimari kararı doğrudan etkilemiştir.
-\end{itemize}
 
 % ─────────────────────────────────────────────
 \section{Mimari}
@@ -210,40 +191,6 @@ $t < 10\,000$ için geçerli. Step=1'de $r=0.5$ (50/50 mix), step=9999'da $r=0.9
 \end{itemize}
 
 % ─────────────────────────────────────────────
-\section{Eğitim Süreci ve Çıkarım Sonuçları}
-% ─────────────────────────────────────────────
-
-\subsection{avg\_nn\_l2 Metriği}
-
-$\text{avg\_nn\_l2}$, denoised embedding ile en yakın kelime dağarcığı token'ı arasındaki ortalama L2 uzaklığıdır. Embedding manifoldu öğrenildiğinde bu değer düşer; hedef $< 150$.
-
-\begin{table}[H]
-\centering
-\begin{tabular}{lccl}
-\toprule
-\textbf{Checkpoint} & \textbf{avg\_nn\_l2} & \textbf{Tam Eşleşme} & \textbf{Not} \\
-\midrule
-50K (eski mimari)   & 416 & \%0   & lm\_head tying bug aktif \\
-100K (eski mimari)  & 558 & \%0.18 & Divergence --- lm\_head tying bug \\
-15K (yeni mimari)   & 559 & ---   & Tying fix sonrası ilk run \\
-30K (yeni mimari)   & 562 & ---   & BERT freeze yok, the/in collapse \\
-\bottomrule
-\end{tabular}
-\caption{Checkpoint bazında embedding manifold kalitesi.}
-\end{table}
-
-\subsection{30K Örnekleme Analizi}
-
-30K checkpoint çıktısı incelendiğinde:
-\begin{itemize}
-    \item Üretilen cevapların tamamı ``the'' veya ``in'' token'larından oluşuyor.
-    \item $\text{avg\_nn\_l2}$: 559 $\to$ 562 (iyileşme yok, kötüleşme var).
-    \item Model loss'u düşürüyor fakat anlamlı dağılım öğrenemiyor: dejenere minimum.
-\end{itemize}
-
-\textbf{Kök Neden:} Tam eğitilebilir BERT (110M) + CLIP donmuş + fusion + diffusion konfigürasyonunda optimizer, en yüksek frekanslı token'ları üreterek NLL loss'u minimize eden kestirme yola giriyor.
-
-% ─────────────────────────────────────────────
 \section{Tartışılacak Konular}
 % ─────────────────────────────────────────────
 
@@ -295,35 +242,6 @@ BERT freeze ile yeniden eğitim başladı. \textbf{Öneri:} 50K adımda örnekle
     \item \textbf{pre\_answer\_loss ablasyonu:} \texttt{pre\_answer\_loss\_weight=0.0} şu an. Fusion supervision (\texttt{0.05}) eğitim dinamiklerini iyileştirir mi?
     \item \textbf{Veri Seti:} Kvasir-VQA-x1'e geçiş ne zaman? BERT freeze sonuçları beklenecek mi, yoksa paralel run yapılacak mı?
 \end{enumerate}
-
-% ─────────────────────────────────────────────
-\section{Mevcut Durum ve Sonraki Adımlar}
-% ─────────────────────────────────────────────
-
-\subsection{Mevcut Durum}
-
-\begin{itemize}
-    \item BERT freeze uygulandı ve sıfırdan eğitim başlatıldı (Bert branch, \texttt{ca42c27}).
-    \item Eğitilebilir parametre sayısı $\approx$50M'a düştü (CLIP + BERT donduruldu).
-    \item 200K adım, her 2500 adımda checkpoint hedefleniyor.
-\end{itemize}
-
-\subsection{Kısa Vadeli Hedefler}
-
-\begin{enumerate}
-    \item \textbf{10K adım:} $\text{avg\_nn\_l2}$ izle --- 500'ün altında kalıyorsa iyileşme sinyali var.
-    \item \textbf{30K adım:} Örnekleme yap, cevap çeşitliliğini kontrol et.
-    \item \textbf{50K adım:} Tam değerlendirme: BLEU/ROUGE/METEOR/BERTScore.
-    \item Veri seti değişikliği kararı 50K sonuçlarına göre.
-\end{enumerate}
-
-\subsection{Uzun Vadeli Hedefler}
-
-\begin{itemize}
-    \item 200K adım tamamlanarak yayın kalitesinde sonuçlara ulaşmak.
-    \item Mimari ablasyon: \texttt{pre\_answer\_loss}, \texttt{use\_noising\_f}, \texttt{nll\_weight} sweepleri.
-    \item Farklı veri setleriyle genellenebilirlik testi.
-\end{itemize}
 
 % ─────────────────────────────────────────────
 \section*{Özet Tablo}
