@@ -7,6 +7,30 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ## 2026-05-19
 
+### [KARAR] `diffuvqa/vqa_model.py` — BERT language encoder freeze edildi
+**Değişiklik:** `feature_fusion.__init__` içinde `self.language_encoder = language_encoder` satırından hemen sonra:
+```python
+for p in self.language_encoder.parameters():
+    p.requires_grad_(False)
+```
+
+**Neden:** BERT-base-uncased 110M parametreden oluşuyor. SLAKE'de 14K eğitim örneği var. Fully trainable BERT, CLIP freeze + diffusion + fusion katmanlarıyla aynı anda optimize edilince optimizer serbestlik derecesi fazla oluyor ve `the`/`in` collapse'a yol açıyor — bu en sık görünen yüksek-frekanslı tokenlar loss'u minimize etmek için yeterli. CLIP freeze'de aynı gerekçe kullanıldı (151M param, BUG 13 sonrası eklendi). Freeze ile sadece fusion + diffusion katmanları (≈50M param) güncelleniyor.
+
+**Etki:** `RESUME_CHECKPOINT = None` — sıfırdan eğitim gerekiyor.
+
+---
+
+### [KARAR] `the`/`in` token collapse analizi — seq_len=16 reddedildi
+**Bağlam:** 30k checkpoint'te avg_nn_l2=562, üretilen cevapların %100'ü `the`/`in` token'larından oluşuyor.
+
+**İncelenen hipotez:** seq_len=32'den 16'ya düşürmek collapse'ı çözebilir mi?
+
+**Analiz:** Collapse inference'ta oluyor — diffusion modeli hangi token distribüsyonunu üretmesi gerektiğini öğrenemiyor. Padding mask loss masking halihazırda uygulanmış durumda (2026-05-11 kararı). seq_len=16 yapsak bile model 16 pozisyon için `the`/`in` üretir. Kök sebep gereksiz parametre sayısı, seq_len değil.
+
+**Karar:** seq_len değiştirilmedi (32'de kalıyor). Yalnızca BERT freeze uygulandı.
+
+---
+
 ### [KARAR] Tüm codebase yorum temizliği yapıldı
 **Değişiklik:** 10 dosyada gereksiz, açıklayıcı olmayan, debug amaçlı ve Türkçe/Çince inline yorumlar kaldırıldı. Toplam 1100+ satır silindi.
 
