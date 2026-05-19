@@ -66,6 +66,8 @@ class feature_fusion(nn.Module):
         self.cross_attention.apply(self.init_weights)
 
         self.language_encoder = language_encoder
+        for p in self.language_encoder.parameters():
+            p.requires_grad_(False)
         self.bert = bert
         # Cache embedding submodules — parent deletes temp_bert.embeddings after init.
         self.position_embeddings = bert.embeddings.position_embeddings
