@@ -20,6 +20,13 @@ def _resolve_image_path(args, image_name):
         return ''
     if args.dataset.lower() == 'davekevin':
         return os.path.join(args.data_dir, 'daveKevin_images', image_name)
+    # JSONL stores paths like "imgs/xmlab102/source.jpg"; if image_dir already
+    # ends with the leading component (e.g. ".../SLAKE/imgs"), strip it to
+    # avoid doubling: ".../SLAKE/imgs/imgs/xmlab102/source.jpg"
+    image_dir_basename = os.path.basename(args.image_dir.rstrip('/'))
+    parts = image_name.replace('\\', '/').split('/')
+    if parts[0] == image_dir_basename:
+        image_name = '/'.join(parts[1:])
     return os.path.join(args.image_dir, image_name)
 
 
