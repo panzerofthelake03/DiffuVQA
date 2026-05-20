@@ -171,6 +171,17 @@
 - Concern: Users may try to resume older checkpoints with mismatched objective flags and assume this is a safe continuation.
 - Follow-up: When resuming, keep the objective flags identical to the checkpoint metadata; otherwise start a fresh run with `RESUME_CHECKPOINT='none'`.
 
+## 2026-05-20
+
+### Decision 22: Exclude WordPiece ## continuation tokens from denoised_fn_round nearest-neighbour search
+- Files: diffuvqa/rounding.py, sample_vqa_GPU.py
+- Change: Added optional `subword_mask` parameter to `get_efficient_knn` and `denoised_fn_round`.
+- Change: In `sample_vqa_GPU.py`, built a boolean mask over the full vocabulary for all token IDs whose string representation starts with `##`, then passed it to `denoised_fn_round` via `partial`.
+- Change: At each DDIM step, `## ` token distances are set to `inf` before `topk`, preventing any `##`-starting token from ever being selected as the nearest neighbour during rounding.
+- Reason: The diffusion rounding step runs at every denoising iteration. If a noisy answer embedding is closest to a `##` continuation token, the trajectory locks into that neighbourhood and stays there for all remaining steps, producing garbled outputs like `##OWzie` regardless of training progress.
+- Concern: Excluding `##` tokens shifts the nearest-neighbour to the next-closest word-beginning token, which may still be semantically wrong at early checkpoints. This prevents the structural failure but does not substitute for sufficient training.
+- Follow-up: Re-run inference on the same checkpoint (029000) and compare `##`-prefix rate and qualitative answer quality against the previous output to confirm the fix has effect.
+
 ### Decision 18: Align Bio-Bert runtime path to Bert-style implementation for speed and simplicity
 - Files: diffuvqa/vqa_model.py, shared/basic_utils.py, sample_vqa_GPU.py
 - Change: Removed unused Pooler class from model fusion code.
