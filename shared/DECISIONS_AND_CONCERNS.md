@@ -204,6 +204,32 @@
 - Concern: The fix is safe for mode=1 (unreachable code path). For mode=2, the 1e-12 floor shifts near-zero distances by a negligible amount with no meaningful effect on cosine similarity ranking.
 - Follow-up: No immediate action required since logits_mode=1 is active. If logits_mode=2 is ever evaluated, verify avg_nn_l2 and gradient norms at step 1 to confirm NaN-free training.
 
+### Decision 25: Fix model_kwargs pollution in training_losses_seq2seq
+- File: diffuvqa/gaussian_diffusion.py
+- Change: Changed `model_kwargs['input_a_id']` to `model_kwargs.pop('input_a_id')` so the key is removed before the model call.
+- Change: Added `model_kwargs.pop('image_name', None)` immediately after `get_ddpm_input` returns, to clean the remaining unconsumed key.
+- Reason: After all pops in training_losses_seq2seq, `input_a_id` and `image_name` were left in model_kwargs and leaked into the final `model(x_t, t, **model_kwargs)` call. TransformerNetModel.forward accepts only (x, timesteps), so any extra kwargs cause a TypeError when calling the model directly. During actual training the call goes through _WrappedModel which silently absorbs extra kwargs, masking the bug. Unit tests that call the model directly exposed it immediately.
+- Concern: The fix does not change training numerics; the wrapped training path was already discarding these keys implicitly. Existing checkpoints are fully compatible.
+- Follow-up: No retraining or checkpoint migration needed. The fix is a code-correctness cleanup only.
+
+### Decision 26: Fix .view() on non-contiguous tensor in get_logits logits_mode=2 path
+- File: diffuvqa/vqa_model.py
+- Change: Changed `text_emb.view(-1, text_emb.size(-1))` to `text_emb.reshape(-1, text_emb.size(-1))` in get_logits (logits_mode=2 branch).
+- Reason: The tensor arriving at this line has been through permute/transpose operations upstream and is non-contiguous in memory. PyTorch .view() requires contiguous layout and raises RuntimeError on non-contiguous tensors. .reshape() falls back to a copy when needed and handles both cases. This was a latent crash in the logits_mode=2 code path, exposed by the architecture test suite (TestDiffusionLoss, TestEndToEndGradientFlow).
+- Concern: The fix is in the logits_mode=2 branch only, which is not active in the current config (logits_mode=1). No impact on existing training or checkpoints.
+- Follow-up: No retraining needed. If logits_mode=2 is ever evaluated, this path is now safe to run.
+
+### Decision 27: Port Bert architecture test suite to Bio-Bert and add tests/test_architecture.py
+- File: tests/test_architecture.py (new, 36 tests across 8 modules)
+- Change: Created tests/test_architecture.py ported from the Bert branch commit 6e3a955, adapted for Bio-Bert model args (vocab_size=28996, config_name=dmis-lab/biobert-base-cased-v1.2, model=transformer-bio-bert).
+- Change: Replaced bert-base-uncased tokenizer references with dmis-lab/biobert-base-cased-v1.2 throughout.
+- Change: Added FUSE_LEN=16 constant; FakeCLIP returns [B, 512, FUSE_LEN] so image-patch-count-based shape assertions are consistent.
+- Change: Replaced test_bert_encoder_grad (trainable assertion) with test_bert_encoder_frozen (frozen assertion) to match Bio-Bert branch behavior where bert.encoder.layer is explicitly frozen.
+- Change: Built SpacedDiffusion directly in build_diffusion() instead of calling create_model_and_diffusion, since transformer-bert key no longer exists in basic_utils.py.
+- Reason: Running the ported tests immediately surfaced Decisions 25 and 26 bugs that were invisible to training. The suite provides the same pre-flight safety net the Bert branch has.
+- Concern: Each test class constructs a full BioBERT model, making the full suite take ~4 minutes on CPU. This is acceptable for a pre-Colab check but should not be added to a hot CI loop.
+- Follow-up: Run python -m pytest tests/test_architecture.py -v --tb=short before any significant code change or before starting a new Colab training run.
+
 ### Decision 23: Apply subword_mask to final logit selection to eliminate ## tokens from output
 - File: sample_vqa_GPU.py
 - Change: After `model.get_logits(sample)`, applied `masked_fill(-inf)` over all `##`-starting token positions in the logit tensor before softmax and topk.

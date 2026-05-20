@@ -396,7 +396,7 @@ class TransformerNetModel(nn.Module):
         elif self.logits_mode == 2:  # standard cosine similarity
             text_emb = hidden_repr
             emb_norm = (self.lm_head.weight ** 2).sum(-1).view(-1, 1)  # vocab
-            text_emb_t = th.transpose(text_emb.view(-1, text_emb.size(-1)), 0, 1)  # d, bsz*seqlen
+            text_emb_t = th.transpose(text_emb.reshape(-1, text_emb.size(-1)), 0, 1)  # d, bsz*seqlen
             arr_norm = (text_emb ** 2).sum(-1).view(-1, 1)  # bsz*seqlen, 1
             dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * th.mm(self.lm_head.weight,
                                                                      text_emb_t)  # (vocab, d) x (d, bsz*seqlen)

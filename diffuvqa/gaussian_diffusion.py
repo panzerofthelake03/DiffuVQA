@@ -615,7 +615,7 @@ class GaussianDiffusion:
         # x_start_mean, _ = model.model.module.get_ddpm_inputs_mask(image, model_kwargs)
         assert 'input_ids' in model_kwargs
         _ = model_kwargs.pop('input_ids').to(t.device)
-        input_ids_a = model_kwargs['input_a_id'].to(t.device)
+        input_ids_a = model_kwargs.pop('input_a_id').to(t.device)
         pad_id = 0
         ans_len_mask = (input_ids_a != pad_id).float()
         # x_start_arr = model.model.module.get_embeds(input_ids_x)
@@ -642,6 +642,7 @@ class GaussianDiffusion:
 
         # Call the underlying model APIs
         ddpm_input_pre, ans_emb_pre = real_model.get_ddpm_input(image, model_kwargs)
+        model_kwargs.pop('image_name', None)
 
         ans_emb = real_model.get_embeds(input_ids_a)
         x_start_mean = ans_emb
