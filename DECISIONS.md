@@ -56,6 +56,21 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+### [KARAR] `use_noising_f=True` ile sıfırdan eğitim — CIGN aktif
+**Değişiklik:** `diffuvqa/config.json` → `use_noising_f: true`. Notebook `RESUME_CHECKPOINT = None`, `USE_NOISING_F = True`.
+
+**Bağlam:** 25K checkpoint (gradient_clipping=0.5): avg_nn_l2=23.751, %100 garbled çıktı. 30K resume (gradient_clipping=1.0): avg_nn_l2=23.770 — daha da kötüleşti. Grad norm 25K'da her adımda tam 0.500 (clip her zaman tetikleniyordu). 30K'da norm peak ~1.0'a çıktı, settled ~0.86 — iyileşme var ama embedding uzayı vocab manifolduna sıfır hareket.
+
+**Hipotez:** `decoder_nll` ve `terms["nll"]` aynı tied tensor (`lm_head.weight = word_embedding.weight`) üzerinden zıt yönlerde gradient itiyor olabilir → net embedding hareketi ≈ 0. Ya da ağırlıklı olarak: CIGN (`use_noising_f=True`) olmaksızın forward process koşulsuz Gaussian gürültüsü ekliyor — diffusion trajectory vocab manifoldundan tamamen kopuk başlıyor.
+
+**CIGN mekanizması:** `use_noising_f=True` ile `x_start_mean` (answer embedding) noising başlangıcı olarak kullanılıyor; saf Gaussian yerine cevap manifolduna yakın bir noktadan başlanıyor. Hem training hem inference'ta birlikte kullanılmalı.
+
+**Beklenti:** avg_nn_l2'nin 25K'da ~23.75'ten belirgin şekilde aşağıya (<15 hedef) inmesi.
+
+**Alternatif (gerekirse):** `decoder_nll` weight'ini düşür veya `pre_answer_loss_weight > 0` dene.
+
+---
+
 ### [BUG FIX] `diffuvqa/gaussian_diffusion.py` — `model_kwargs` pollution: `input_a_id` pop edilmiyordu
 **Değişiklik:** `training_losses_seq2seq` içinde:
 ```python
