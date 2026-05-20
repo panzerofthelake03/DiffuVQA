@@ -2,8 +2,8 @@
 
 ## Aktif Görevler
 
-- [ ] 25K checkpoint'ten resume et (gradient_clipping=1.0 ile), 5-10K adım sonra avg_nn_l2 < 15 oldu mu kontrol et
-- [ ] avg_nn_l2 hala > 15 ise `use_noising_f=True` dene (hem training hem inference'ta birlikte — sıfırdan)
+- [ ] `use_noising_f=True` ile sıfırdan eğitim başlat — 25K'da sampling yap, avg_nn_l2 < 15 oldu mu kontrol et
+- [ ] avg_nn_l2 hala > 15 ise: `decoder_nll` weight'ini düşür veya `pre_answer_loss_weight` > 0 dene
 - [ ] 200k sonrası sampling sweep: `(decode_top_k=5, min_answer_tokens=2, conf=0.25)`, `(5, 2, 0.20)`, `(7, 2, 0.20)` kombinasyonlarını dene
 - [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
 - [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (eğitim olgunlaşınca)
