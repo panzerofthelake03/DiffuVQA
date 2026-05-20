@@ -173,6 +173,22 @@ def main():
     model.eval().requires_grad_(False).to(device)
 
     tokenizer = load_tokenizer(args)
+
+    # Build ## subword mask: PubMedBERT WordPiece continuation tokens start with ##.
+    # Excluded from both intermediate rounding (Decision 22) and final logit selection (Decision 23).
+    subword_mask = None
+    try:
+        _inner_tok = tokenizer.tokenizer
+        if hasattr(_inner_tok, 'get_vocab'):
+            _vocab = _inner_tok.get_vocab()
+            subword_mask = th.zeros(len(_vocab), dtype=th.bool)
+            for token, idx in _vocab.items():
+                if token.startswith('##'):
+                    subword_mask[idx] = True
+            logger.log(f"### Subword mask: {subword_mask.sum().item()} ## tokens excluded from rounding and logits")
+    except Exception as e:
+        logger.log(f"### Warning: could not build subword_mask ({e}), ## tokens not excluded")
+
     # Create a model embedding object for nearest-neighbor / rounding.
     # If the pretrained word embedding dim matches args.hidden_dim we can clone it,
     # otherwise keep the original embedding module (it will be moved to CUDA).
@@ -318,7 +334,7 @@ def main():
                 sample_shape,
                 noise=x_noised,
                 clip_denoised=args.clip_denoised,
-                denoised_fn=partial(denoised_fn_round, args, model_emb),
+                denoised_fn=partial(denoised_fn_round, args, model_emb, subword_mask=subword_mask),
                 model_kwargs=model_kwargs,
                 top_p=args.top_p,
                 clamp_step=args.clamp_step,
@@ -332,6 +348,12 @@ def main():
         sample = sample[:, fuse_len:fuse_len + answer_len, :]
     # sample shape suppressed
         logits = model.get_logits(sample)
+        # Decision 23: exclude ## continuation tokens from final token selection
+        if subword_mask is not None:
+            logits = logits.masked_fill(
+                subword_mask.to(logits.device).unsqueeze(0).unsqueeze(0),
+                float('-inf')
+            )
         probs = th.softmax(logits, dim=-1)
 
         top_k = int(getattr(args, 'decode_top_k', 5))
