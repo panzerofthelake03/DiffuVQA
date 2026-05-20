@@ -438,8 +438,9 @@ class GaussianDiffusion:
         """
         assert 'input_ids' in model_kwargs
         input_ids_x = model_kwargs.pop('input_ids').to(t.device)
-        input_ids_a = model_kwargs['input_a_id'].to(t.device)
+        input_ids_a = model_kwargs.pop('input_a_id').to(t.device)
         mask = model_kwargs.pop('input_mask').to(t.device)
+        model_kwargs.pop('image_name', None)
 
         # Unwrap DataParallel / custom wrappers to reach the raw model API.
         real_model = model
