@@ -196,3 +196,10 @@
 - Reason: Reduce startup overhead, reduce early-step jitter from backend warm-up effects, and make the Bio-Bert code path structurally closer to Bert branch behavior while keeping the model identifier self-descriptive.
 - Concern: Existing checkpoints trained before this change are not strict-load compatible when key paths include fuse.bert_embeddings.* and when lm_head.bias exists.
 - Follow-up: Add and use a checkpoint key migration utility for legacy runs, or resume only from checkpoints produced after this refactor.
+
+### Decision 23: Apply subword_mask to final logit selection to eliminate ## tokens from output
+- File: sample_vqa_GPU.py
+- Change: After `model.get_logits(sample)`, applied `masked_fill(-inf)` over all `##`-starting token positions in the logit tensor before softmax and topk.
+- Reason: Decision 22 applied the subword_mask only to `denoised_fn_round`, which controls the intermediate diffusion trajectory. Analysis of the samplestep30 output (same checkpoint, seed102) confirmed that `##` tokens in the final output come from `model.get_logits` → logit argmax, which was completely independent of the rounding mask. The two samplestep25 and samplestep30 outputs were token-for-token identical for the first ~50 lines, proving the rounding fix had no effect on generated answers. The avg_nn_l2 drop (~15–20 units) confirmed the rounding path was affected, but that does not propagate to the discrete output.
+- Concern: Masking ## tokens from logits forces the model to always select the next-best non-## token. At this training stage that token may still be semantically wrong, but the structural garbage (##OWzie, ##sedel, etc.) will be eliminated.
+- Follow-up: Re-run inference and verify zero ##-prefixed outputs. Then assess whether remaining answer quality is improving with further training steps.
