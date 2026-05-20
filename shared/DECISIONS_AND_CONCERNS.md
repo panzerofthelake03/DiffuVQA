@@ -197,6 +197,13 @@
 - Concern: Existing checkpoints trained before this change are not strict-load compatible when key paths include fuse.bert_embeddings.* and when lm_head.bias exists.
 - Follow-up: Add and use a checkpoint key migration utility for legacy runs, or resume only from checkpoints produced after this refactor.
 
+### Decision 24: Fix sqrt(0) NaN gradient in get_logits logits_mode=2 path
+- File: diffuvqa/vqa_model.py
+- Change: Changed `th.clamp(dist, 0.0, np.inf)` to `th.clamp(dist, 1e-12, np.inf)` in `get_logits` (logits_mode=2 branch).
+- Reason: Squared L2 distances computed via floating-point matrix ops can produce small negative values (~-1.9e-6) due to rounding. Clamping to 0.0 produces exact zeros; `sqrt(0)` backward computes `1/(2*sqrt(0)) = inf`, propagating NaN gradients to all model parameters silently. Decision 8 made this deterministically triggerable at full training scale by routing `x_start_mean` (full vocab rows) through `_token_discrete_loss`, which calls `get_logits`. The bug is dormant in the current config (logits_mode defaults to 1) but would fire immediately if logits_mode=2 were activated.
+- Concern: The fix is safe for mode=1 (unreachable code path). For mode=2, the 1e-12 floor shifts near-zero distances by a negligible amount with no meaningful effect on cosine similarity ranking.
+- Follow-up: No immediate action required since logits_mode=1 is active. If logits_mode=2 is ever evaluated, verify avg_nn_l2 and gradient norms at step 1 to confirm NaN-free training.
+
 ### Decision 23: Apply subword_mask to final logit selection to eliminate ## tokens from output
 - File: sample_vqa_GPU.py
 - Change: After `model.get_logits(sample)`, applied `masked_fill(-inf)` over all `##`-starting token positions in the logit tensor before softmax and topk.

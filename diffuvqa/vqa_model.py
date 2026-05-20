@@ -400,7 +400,7 @@ class TransformerNetModel(nn.Module):
             arr_norm = (text_emb ** 2).sum(-1).view(-1, 1)  # bsz*seqlen, 1
             dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * th.mm(self.lm_head.weight,
                                                                      text_emb_t)  # (vocab, d) x (d, bsz*seqlen)
-            scores = th.sqrt(th.clamp(dist, 0.0, np.inf)).view(emb_norm.size(0), hidden_repr.size(0),
+            scores = th.sqrt(th.clamp(dist, 1e-12, np.inf)).view(emb_norm.size(0), hidden_repr.size(0),
                                                                hidden_repr.size(1))  # vocab, bsz*seqlen
             scores = -scores.permute(1, 2, 0).contiguous()
             return scores
