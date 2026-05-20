@@ -5,6 +5,28 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+## 2026-05-20
+
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — `decoder_nll` loss'a geri eklendi
+**Değişiklik:** `terms["loss"] = terms["mse"] + terms["nll"] + pre_answer_loss` → `terms["loss"] = terms["mse"] + terms["nll"] + decoder_nll + pre_answer_loss`
+
+**Neden:** Önceki kararda (2026-05-18) `decoder_nll` çifte sayım gerekçesiyle çıkarılmıştı. Ancak bu yanlıştı: `decoder_nll = _token_discrete_loss(x_start_mean, ...)` temiz cevap embedding'inin vocab'a ne kadar yakın olduğunu ölçer; `terms["nll"] = _token_discrete_loss(model_out_x_start, ...)` ise denoised çıktının vocab'a yakınlığını. İkisi farklı şeyleri hedefliyor. `decoder_nll` olmayınca word_embedding uzayı vocab'tan serbestçe kayabiliyor — 25K sampling'de avg_nn_l2=23.5 bunun kanıtıydı. Orijinal cloneiq tasarımında her iki terim de loss'ta.
+
+**Etki:** Embedding uzayının vocab manifolduna bağlı kalması bekleniyor; avg_nn_l2'nin daha hızlı düşmesi gerekiyor. Sıfırdan eğitim gerekiyor.
+
+---
+
+### [KARAR] `diffuvqa/rounding.py` + `sample_vqa_GPU.py` — WordPiece `##` tokenları denoising ve logit seçiminden dışlandı
+**Değişiklik 1 (Decision 22 karşılığı):** `get_efficient_knn`'e `subword_mask` parametresi eklendi. `##` ile başlayan tokenlara ait squared-L2 mesafeleri `inf` yapılıyor — her DDIM adımında bu tokenlar nearest-neighbour adayı olamıyor. `denoised_fn_round` da `subword_mask` alacak şekilde güncellendi; `partial()` ile inference'a iletiliyor.
+
+**Değişiklik 2 (Decision 23 karşılığı):** `sample_vqa_GPU.py`'de `model.get_logits(sample)` sonrasına `logits.masked_fill(subword_mask, -inf)` eklendi — `topk` öncesinde `##` tokenlar logit uzayından tamamen çıkarılıyor.
+
+**Neden:** BERT WordPiece tokenizer'da `##` ile başlayan tokenlar kelime ortası parçacıklardır ("playing" → `["play", "##ing"]`). Rounding sırasında gürültülü embedding bu tokenlara kilitlenirse trajectory tüm DDIM adımları boyunca `##OWzie`, `##sedel` gibi çıktılar üretir. Logit maskeleme ise rounding'den bağımsız olarak final çıktıdan `##` tokenları tamamen kaldırır — BioBERT branch'inde (Decision 22/23) doğrulanmış fix.
+
+**Uygulama notu:** `subword_mask` tokenizer vocab'tan bir kez build ediliyor (~4K token), her batch'te GPU'ya taşınıyor, ek hesaplama maliyeti ihmal edilebilir.
+
+---
+
 ## 2026-05-19
 
 ### [KARAR] `diffuvqa/vqa_model.py` — BERT language encoder freeze edildi

@@ -2,17 +2,18 @@
 
 ## Aktif Görevler
 
-- [ ] Bert 200k eğitimi tamamlanınca (her 5k'da) sampling yap ve sonuçları değerlendir — ilk sample 10k'da
+- [ ] Sıfırdan eğitim başlat (decoder_nll + subword_mask fix dahil), 25K–50K sampling ile avg_nn_l2 ve exact match takip et
+- [ ] 50K sampling'de anlamlı çıktı yoksa `use_noising_f=True` dene (hem training hem inference'ta birlikte)
 - [ ] 200k sonrası sampling sweep: `(decode_top_k=5, min_answer_tokens=2, conf=0.25)`, `(5, 2, 0.20)`, `(7, 2, 0.20)` kombinasyonlarını dene
 - [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
-- [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (200k sonrası)
+- [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (eğitim olgunlaşınca)
 
 ## Tamamlanan Görevler
 
 - [x] `diffuvqa/vqa_model.py` — CLIP vision encoder freeze edildi (`requires_grad_(False)`)
 - [x] `diffuvqa/vqa_model.py` — lm_head weight tying bert/pubmedbert/roberta dallarında `word_embedding` set sonrası re-tie edildi
 - [x] `diffuvqa/vqa_model.py` — `get_logits` logits_mode=2 dalında `.view()` → `.reshape()` (non-contiguous tensor fix)
-- [x] `diffuvqa/gaussian_diffusion.py` — `decoder_nll` ve `tT_loss` loss formülünden çıkarıldı
+- [x] `diffuvqa/gaussian_diffusion.py` — `decoder_nll` ve `tT_loss` loss formülünden çıkarıldı (sonradan decoder_nll geri eklendi — bkz. 2026-05-20)
 - [x] `diffuvqa/rounding.py` — `get_efficient_knn` içinde `.view()` → `.reshape()` (non-contiguous tensor fix)
 - [x] `shared/basic_utils.py` — `decode_token` içinde `.squeeze(-1)` → `.reshape(-1)`; `logits_mode` TransformerNetModel'e iletiliyor
 - [x] `diffuvqa/utils/logger.py` — `import wandb` kaldırıldı
@@ -83,3 +84,6 @@
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Training hücresi `--use_noising_f` ve `--pre_answer_loss_weight` argümanları eklendi
 - [x] Tüm codebase yorum temizliği — `gaussian_diffusion.py`, `sample_vqa_GPU.py`, `shared/basic_utils.py`, `diffuvqa/rounding.py`, `diffuvqa/vqa_datasets.py`, `diffuvqa/step_sample.py`, `diffuvqa/vqa_model.py`, `shared/train_util.py`, `train.py` (1100+ satır gereksiz yorum/dead code silindi)
 - [x] `notebooks/run_diffuvqa_colab.ipynb` — Notebook tam temizliği: emoji, debug print, gereksiz yorum kaldırıldı; `imgs/imgs` path tripling düzeltildi; dead cell (`vqa_datasets` test) silindi (1463 satır silindi)
+- [x] `diffuvqa/gaussian_diffusion.py` — `decoder_nll` loss'a geri eklendi (embedding vocab anchor — avg_nn_l2 drift düzeltmesi)
+- [x] `diffuvqa/rounding.py` — `get_efficient_knn` + `denoised_fn_round`'a `subword_mask` eklendi: `##` tokenlar DDIM trajectory'den dışlandı
+- [x] `sample_vqa_GPU.py` — `##` token logit maskeleme eklendi: `get_logits` sonrası `topk` öncesi `masked_fill(-inf)` ile final çıktıdan `##` tokenlar tamamen çıkarıldı
