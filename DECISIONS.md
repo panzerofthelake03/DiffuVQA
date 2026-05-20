@@ -27,6 +27,17 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+### [KARAR] `diffuvqa/config.json` — `gradient_clipping` 0.5 → 1.0
+**Değişiklik:** `gradient_clipping: 0.5` → `gradient_clipping: 1.0`
+
+**Neden:** 25K analizi: loss %97.8 düştü (19.24 → 0.42) ama avg_nn_l2 = 23.75 — önceki run'dan sıfır fark. Grad norm progress.csv'de tüm 25K boyunca sabit ~0.5 — yani her adımda clip tetikleniyordu. `word_embedding` [30522, 768] boyutlu büyük bir matris; 0.5 normu bu matrisin gerçek gradient adımını her seferinde kesiyor. Embedding uzayı vocab manifolduna hiç yaklaşamıyor.
+
+**Strateji:** Tek değişken izole edildi — önce clip artışının etkisini ölç, ardından gerekirse `use_noising_f=True` dene. 25K checkpoint'ten resume ederek 5-10K adım sonra avg_nn_l2'ye bakılacak.
+
+**Beklenti:** avg_nn_l2'nin 25K'da olduğu 23.75'ten aşağıya doğru hareket etmesi. Grad norm'un artık zaman zaman 1.0'ın altında kalması.
+
+---
+
 ### [KARAR] `tests/test_architecture.py` — Test hiperparametreleri gerçek training boyutlarına çekildi
 **Değişiklik:** `B=2, Q_LEN=16, A_LEN=8` → `B=4, Q_LEN=32, A_LEN=32`
 
