@@ -367,6 +367,11 @@ def main():
             sample = sample[:, answer_start:answer_end, :]
             # sample shape suppressed
             logits = model.get_logits(sample)
+            if subword_mask is not None:
+                logits = logits.masked_fill(
+                    subword_mask.to(logits.device).unsqueeze(0).unsqueeze(0),
+                    float('-inf')
+                )
             probs = th.softmax(logits, dim=-1)
             decode_top_k = max(1, int(getattr(args, 'decode_top_k', 1)))
             decode_top_k = min(decode_top_k, probs.size(-1))
