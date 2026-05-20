@@ -189,6 +189,20 @@ def main():
         except Exception:
             pass
 
+    # Build a boolean mask over the vocabulary for WordPiece ## continuation tokens.
+    # These tokens should never be the nearest neighbour during denoised_fn_round
+    # because a diffusion trajectory that snaps to a ## token early will stay there.
+    subword_mask = None
+    _inner_tok = getattr(tokenizer, 'tokenizer', None)
+    if _inner_tok is not None and hasattr(_inner_tok, 'get_vocab'):
+        _vocab = _inner_tok.get_vocab()
+        _subword_ids = [tid for tok, tid in _vocab.items() if tok.startswith('##')]
+        if _subword_ids:
+            _vocab_size = model_emb.weight.size(0)
+            subword_mask = th.zeros(_vocab_size, dtype=th.bool, device='cuda')
+            subword_mask[th.tensor([i for i in _subword_ids if i < _vocab_size], dtype=th.long)] = True
+            logger.log(f"### subword_mask: excluding {subword_mask.sum().item()} ## tokens from rounding")
+
     set_seed(args.seed2)
 
     logger.log(f"### Sampling...on {args.split}")
@@ -337,7 +351,7 @@ def main():
                     sample_shape,
                     noise=x_noised,
                     clip_denoised=args.clip_denoised,
-                    denoised_fn=partial(denoised_fn_round, args, model_emb),
+                    denoised_fn=partial(denoised_fn_round, args, model_emb, subword_mask=subword_mask),
                     model_kwargs=model_kwargs,
                     top_p=args.top_p,
                     clamp_step=args.clamp_step,
