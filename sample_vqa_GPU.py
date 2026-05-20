@@ -124,6 +124,18 @@ def main():
 
     set_seed(args.seed2)
 
+    # Build a boolean mask [vocab_size] that is True for every ## continuation token.
+    # Used in (1) denoised_fn_round to prevent trajectory lock-in on subword tokens,
+    # and (2) final logit masking to eliminate ## tokens from discrete output.
+    _raw_tok = tokenizer.tokenizer if hasattr(tokenizer, 'tokenizer') else tokenizer
+    _vocab = _raw_tok.get_vocab()
+    subword_mask = torch.zeros(len(_vocab), dtype=torch.bool)
+    for token, idx in _vocab.items():
+        if token.startswith('##'):
+            subword_mask[idx] = True
+    subword_mask = subword_mask.to(device)
+    logger.log(f"### Subword mask: {subword_mask.sum().item()} ## tokens excluded from decoding")
+
     logger.log(f"### Sampling...on {args.split}")
 
     transform = transforms.Compose([
@@ -226,7 +238,7 @@ def main():
                     sample_shape,
                     noise=_noise,
                     clip_denoised=args.clip_denoised,
-                    denoised_fn=partial(denoised_fn_round, args, model_emb),
+                    denoised_fn=partial(denoised_fn_round, args, model_emb, subword_mask=subword_mask),
                     model_kwargs=model_kwargs,
                     top_p=args.top_p,
                     clamp_step=args.clamp_step,
@@ -249,6 +261,9 @@ def main():
 
         sample = sample[:, fuse_len:fuse_len + answer_len, :]
         logits = model.get_logits(sample)
+
+        # Mask ## continuation tokens from logits so they can never appear in output.
+        logits = logits.masked_fill(subword_mask.unsqueeze(0).unsqueeze(0), float('-inf'))
 
         decode_top_k = max(1, getattr(args, 'decode_top_k', 5))
         cands = th.topk(logits, k=decode_top_k, dim=-1)

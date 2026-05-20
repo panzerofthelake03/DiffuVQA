@@ -12,12 +12,15 @@ def get_knn(model_emb, text_emb, dist='cos'):
     topk_out = torch.topk(adjacency, k=6, dim=0)
     return topk_out.values, topk_out.indices
 
-def get_efficient_knn(model_emb, text_emb):
+def get_efficient_knn(model_emb, text_emb, subword_mask=None):
     emb_norm = (model_emb**2).sum(-1).reshape(-1, 1)
     text_emb_t = torch.transpose(text_emb.reshape(-1, text_emb.size(-1)), 0, 1)
     arr_norm = (text_emb ** 2).sum(-1).reshape(-1, 1)
     dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * torch.mm(model_emb, text_emb_t)
     dist = torch.clamp(dist, 0.0, np.inf)
+    if subword_mask is not None:
+        # Set ## continuation token distances to inf so they are never selected.
+        dist[subword_mask.to(dist.device)] = float('inf')
     topk_out = torch.topk(-dist, k=1, dim=0)
     return topk_out.values, topk_out.indices
 
@@ -85,7 +88,7 @@ def get_weights(model, args):
     model.weight.requires_grad = False
     return model
 
-def denoised_fn_round(args, model, text_emb, t):
+def denoised_fn_round(args, model, text_emb, t, subword_mask=None):
     model_emb = model.weight
     old_shape = text_emb.shape
     old_device = text_emb.device
@@ -95,7 +98,7 @@ def denoised_fn_round(args, model, text_emb, t):
     else:
         text_emb = text_emb
 
-    val, indices = get_efficient_knn(model_emb, text_emb.to(model_emb.device))
+    val, indices = get_efficient_knn(model_emb, text_emb.to(model_emb.device), subword_mask=subword_mask)
     rounded_tokens = indices[0]
     new_embeds = model(rounded_tokens).view(old_shape).to(old_device)
 
