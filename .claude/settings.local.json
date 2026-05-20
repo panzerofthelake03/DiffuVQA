@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git ls-tree *)",
+      "Bash(python tests/test_architecture.py)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import json; d=json.load\\(open\\('diffuvqa/config.json'\\)\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if isinstance\\(v,\\(int,float,bool,str\\)\\)}, indent=2\\)\\)\")"
+    ]
+  }
+}
