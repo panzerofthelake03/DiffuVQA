@@ -27,6 +27,41 @@ Proje boyunca alınan teknik kararlar ve dikkat edilmesi gereken noktalar.
 
 ---
 
+### [KARAR] `tests/test_architecture.py` — Test hiperparametreleri gerçek training boyutlarına çekildi
+**Değişiklik:** `B=2, Q_LEN=16, A_LEN=8` → `B=4, Q_LEN=32, A_LEN=32`
+
+**Neden:** Küçük parametreler bazı bug'ları gizledi. Özellikle `sqrt(0)` NaN bug'ı B=2/Q=16/A=8 ile hiç tetiklenmiyordu — bu boyutlarda `dist<0` pozisyon sayısı tesadüfen sıfır çıkıyor. B=4/Q=32/A=32 (gerçek training seq_len) ile `[CLS]`, `[SEP]`, `[PAD]` tokenları yeterince çoğalınca bug step 1'de deterministik olarak patlıyor. `fake_cond()` de B'ye dinamik hale getirildi (önceden 2 sabit örnek vardı, `[:B]` slice B>2'de sessizce kısalıyordu).
+
+**Kural:** Test hiperparametreleri `seq_len` ve tensor shape bakımından gerçek training değerleriyle eşleşmeli. Batch boyutu CPU'da makul süre için küçük (4) tutulabilir.
+
+---
+
+### [BUG FIX] `diffuvqa/vqa_model.py` — `get_logits` logits_mode=2: `sqrt(0)` NaN gradient patlaması
+**Değişiklik:** `th.clamp(dist, 0.0, np.inf)` → `th.clamp(dist, 1e-12, np.inf)`
+
+**Neden:** `decoder_nll = _token_discrete_loss(x_start_mean, ...)` fonksiyonu için `x_start_mean = get_embeds(input_ids_a)` — tam vocab satırları. `lm_head.weight` ve `word_embedding.weight` aynı tensor (tied). Bu nedenle bazı token pozisyonlarında `dist` floating point precision nedeniyle `~0` veya negatif (`-1.9e-6`) çıkıyor. `clamp(0)` sıfıra basıyor, ardından `sqrt(0)` backward'da `1/(2*sqrt(0)) = inf` → NaN gradient → tüm parametreler step 1'de NaN. Test'te bu `LR=1e-5` ile bile step 1'de 243 parametre NaN'a gidiyor şeklinde gözlemlendi.
+
+**Etki:** `decoder_nll` loss'a eklendiği andan itibaren her training run'da step 1'de model patlıyor ve öğrenemiyor. **Bu en kritik bug.** Fix ile step 1'den itibaren NaN yok, loss düşüyor, avg_nn_l2 düşüyor.
+
+---
+
+### [BUG FIX] `diffuvqa/gaussian_diffusion.py` — `model_kwargs` pollution: `input_a_id` pop edilmiyordu
+**Değişiklik:** `training_losses_seq2seq` içinde:
+```python
+# Önce (bug):
+input_ids_a = model_kwargs['input_a_id']   # dict access, silinmedi
+
+# Sonra (fix):
+input_ids_a = model_kwargs.pop('input_a_id')  # pop ile temizlendi
+model_kwargs.pop('image_name', None)           # image_name de temizlendi
+```
+
+**Neden:** `input_ids`, `input_mask` pop edilirken `input_a_id` dict'te kalıyordu. Ardından `model(x_t, t, **model_kwargs)` çağrısında `TransformerNetModel.forward(self, x, timesteps)` imzasına beklenmedik `input_a_id=tensor` kwarg olarak iletiliyordu.
+
+**Öğrenmeye etkisi:** Training Colab'da `SpacedDiffusion._WrappedModel` path'inden geçiyor. `_WrappedModel.__call__(self, x, ts, **kwargs)` tanımı bu `**kwargs`'ı tamamen yutuyor — `return self.model(x, new_ts)` ile modele iletmiyor. Bu nedenle training crash olmadı ve öğrenme bozulmadı. Ancak `model_kwargs` state'i kirli kalıyordu; fix kod doğruluğu ve future-proof güvenlik için gerekli.
+
+---
+
 ## 2026-05-19
 
 ### [KARAR] `diffuvqa/vqa_model.py` — BERT language encoder freeze edildi

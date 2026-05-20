@@ -385,7 +385,7 @@ class TransformerNetModel(nn.Module):
             text_emb_t = th.transpose(text_emb.reshape(-1, text_emb.size(-1)), 0, 1)
             arr_norm = (text_emb ** 2).sum(-1).reshape(-1, 1)
             dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * th.mm(self.lm_head.weight, text_emb_t)
-            scores = th.sqrt(th.clamp(dist, 0.0, np.inf)).view(
+            scores = th.sqrt(th.clamp(dist, 1e-12, np.inf)).view(
                 emb_norm.size(0), hidden_repr.size(0), hidden_repr.size(1))
             return -scores.permute(1, 2, 0).contiguous()
         else:

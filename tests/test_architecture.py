@@ -74,9 +74,12 @@ def make_args(**overrides):
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
-B = 2        # batch size
-Q_LEN = 16  # question token length
-A_LEN = 8   # answer token length
+# Match real training shapes so tests catch bugs that only appear at training scale.
+# Real training: batch_size=64, seq_len=32 (question), seq_len=32 (answer).
+# CPU test uses B=4 to keep runtime reasonable, but Q_LEN/A_LEN match production.
+B = 4        # batch size (real: 64 — kept small for CPU)
+Q_LEN = 32  # question token length (matches training seq_len)
+A_LEN = 32  # answer token length (matches training seq_len)
 H = 768      # hidden dim
 DEVICE = torch.device("cpu")
 
@@ -139,8 +142,11 @@ def fake_image():
 def fake_cond(q_len=Q_LEN, a_len=A_LEN):
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained("bert-base-uncased")
-    questions = ["what organ is shown?", "is this image normal?"][:B]
-    answers   = ["liver", "no"][:B]
+    _q_pool = ["what organ is shown?", "is this image normal?",
+               "what color is the tissue?", "is there a tumor present?"]
+    _a_pool = ["liver", "no", "red", "yes"]
+    questions = [_q_pool[i % len(_q_pool)] for i in range(B)]
+    answers   = [_a_pool[i % len(_a_pool)] for i in range(B)]
     q_enc = tok(questions, padding="max_length", max_length=q_len,
                 truncation=True, return_tensors="pt")
     a_enc = tok(answers, padding="max_length", max_length=a_len,
@@ -151,7 +157,7 @@ def fake_cond(q_len=Q_LEN, a_len=A_LEN):
         "input_ids":   q_enc["input_ids"].to(DEVICE),
         "input_a_id":  a_enc["input_ids"].to(DEVICE),
         "input_mask":  mask.to(DEVICE),
-        "image_name":  ["img1.jpg", "img2.jpg"][:B],
+        "image_name":  [f"img{i}.jpg" for i in range(B)],
     }
 
 
@@ -679,6 +685,242 @@ class TestEndToEndGradientFlow:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# MODULE 9 — Learning dynamics (does the model actually learn?)
+# ══════════════════════════════════════════════════════════════════════════════
+class TestLearningDynamics:
+    """
+    These tests simulate a mini training loop to verify the model can actually
+    learn — not just that the architecture is structurally correct.
+
+    A model that passes all shape/grad tests but fails here has a training
+    dynamics problem (bad loss design, dead gradients, optimizer issue, etc.).
+    """
+
+    TRAIN_STEPS = 30
+    LR = 1e-3
+
+    def setup_method(self):
+        self.model     = build_model()
+        self.diffusion = build_diffusion(steps=100)
+
+    def _make_fixed_batch(self):
+        """Same batch every call — used to test memorisation on a fixed example."""
+        torch.manual_seed(42)
+        img    = fake_image()
+        cond   = fake_cond()
+        kwargs = {
+            "input_ids":  cond["input_ids"],
+            "input_q_id": cond["input_q_id"],
+            "input_a_id": cond["input_a_id"],
+            "input_mask": cond["input_mask"],
+            "image_name": cond["image_name"],
+        }
+        return img, kwargs
+
+    def _trainable_params(self):
+        return [p for p in self.model.parameters() if p.requires_grad]
+
+    def test_loss_decreases_over_training_steps(self):
+        """
+        After TRAIN_STEPS optimizer steps on a fixed batch, mean loss must be
+        strictly lower than initial loss.  If this fails, the optimizer or loss
+        design is fundamentally broken — gradients exist but don't move the model
+        in a useful direction.
+        """
+        opt = torch.optim.Adam(self._trainable_params(), lr=self.LR)
+        img, kwargs_template = self._make_fixed_batch()
+
+        losses = []
+        for step in range(self.TRAIN_STEPS):
+            # Re-create kwargs each step (pop-safe copy)
+            kwargs = {k: (v.clone() if isinstance(v, torch.Tensor) else v)
+                      for k, v in kwargs_template.items()}
+            opt.zero_grad()
+            t = torch.randint(1, 100, (B,), device=DEVICE)
+            terms = self.diffusion.training_losses_seq2seq(
+                self.model, img, t, model_kwargs=kwargs)
+            loss = terms["loss"].mean()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self._trainable_params(), 1.0)
+            opt.step()
+            losses.append(loss.item())
+
+        first_avg  = sum(losses[:5])  / 5
+        last_avg   = sum(losses[-5:]) / 5
+        print(f"\n  loss first-5 avg = {first_avg:.4f}   last-5 avg = {last_avg:.4f}")
+        assert last_avg < first_avg, (
+            f"Loss did NOT decrease after {self.TRAIN_STEPS} steps: "
+            f"first={first_avg:.4f} → last={last_avg:.4f}. "
+            f"Check optimizer, loss scaling, or gradient flow."
+        )
+
+    def test_avg_nn_l2_decreases_with_decoder_nll(self):
+        """
+        avg_nn_l2 (distance from denoised embedding to nearest vocab token) must
+        decrease during training.  If it stays high or increases, decoder_nll is
+        not anchoring the embedding space to the vocab manifold.
+        """
+        from diffuvqa.rounding import get_efficient_knn
+        opt = torch.optim.Adam(self._trainable_params(), lr=self.LR)
+        img, kwargs_template = self._make_fixed_batch()
+
+        def _avg_nn_l2():
+            cond = fake_cond()
+            with torch.no_grad():
+                fuse_feats, _ = self.model.get_ddpm_input(img, {"input_q_id": cond["input_q_id"]})
+                ans_emb = self.model.get_embeds(cond["input_a_id"])
+                x_start = torch.cat([fuse_feats, ans_emb], dim=1)
+                # Denoise at t=0 (clean signal path)
+                t_zero  = torch.zeros(B, dtype=torch.long, device=DEVICE)
+                denoised = self.model(x_start, t_zero)
+                ans_out  = denoised[:, fuse_feats.size(1):, :]
+                flat = ans_out.reshape(-1, H)
+                val, _ = get_efficient_knn(self.model.word_embedding.weight, flat)
+                return (-val).clamp(min=0).sqrt().mean().item()
+
+        l2_before = _avg_nn_l2()
+
+        for step in range(self.TRAIN_STEPS):
+            kwargs = {k: (v.clone() if isinstance(v, torch.Tensor) else v)
+                      for k, v in kwargs_template.items()}
+            opt.zero_grad()
+            t = torch.randint(1, 100, (B,), device=DEVICE)
+            terms = self.diffusion.training_losses_seq2seq(
+                self.model, img, t, model_kwargs=kwargs)
+            terms["loss"].mean().backward()
+            torch.nn.utils.clip_grad_norm_(self._trainable_params(), 1.0)
+            opt.step()
+
+        l2_after = _avg_nn_l2()
+        print(f"\n  avg_nn_l2  before={l2_before:.4f}  after={l2_after:.4f}")
+        assert l2_after < l2_before, (
+            f"avg_nn_l2 did NOT decrease: before={l2_before:.4f} → after={l2_after:.4f}. "
+            f"decoder_nll may not be anchoring the embedding space."
+        )
+
+    def test_sampling_is_consistent_for_same_input(self):
+        """
+        Two sampling runs with the same seed on the same input must produce
+        identical token sequences.  If they differ, the determinism path is
+        broken (seed not applied, stochastic side effects leaking through).
+        """
+        from diffuvqa.rounding import denoised_fn_round, get_efficient_knn
+        from functools import partial
+        from transformers import AutoTokenizer
+
+        img, kwargs_template = self._make_fixed_batch()
+        cond = fake_cond()
+
+        tok = AutoTokenizer.from_pretrained("bert-base-uncased")
+        vocab = tok.get_vocab()
+        subword_mask = torch.zeros(len(vocab), dtype=torch.bool)
+        for t_str, idx in vocab.items():
+            if t_str.startswith("##"):
+                subword_mask[idx] = True
+
+        model_emb = self.model.word_embedding.eval().requires_grad_(False)
+
+        def _sample(seed):
+            torch.manual_seed(seed)
+            kwargs = {k: (v.clone() if isinstance(v, torch.Tensor) else v)
+                      for k, v in kwargs_template.items()}
+            input_a_id = kwargs.pop("input_a_id")
+            kwargs.pop("input_ids", None)
+            kwargs.pop("input_mask", None)
+            kwargs.pop("image_name", None)
+
+            with torch.no_grad():
+                fuse_feats, _ = self.model.get_ddpm_input(img, kwargs)
+                fuse_len   = fuse_feats.size(1)
+                ans_len    = input_a_id.size(1)
+                ans_noise  = torch.randn(B, ans_len, H, device=DEVICE)
+                x_start    = torch.cat([fuse_feats, ans_noise], dim=1)
+
+                fuse_mask = torch.zeros((B, fuse_len), dtype=torch.long, device=DEVICE)
+                ans_mask  = torch.ones((B, ans_len),  dtype=torch.long, device=DEVICE)
+                full_mask = torch.cat([fuse_mask, ans_mask], dim=1)
+                input_ids_mask = torch.broadcast_to(
+                    full_mask.unsqueeze(-1), x_start.shape)
+
+                args = make_args(diffusion_steps=100)
+                samples = self.diffusion.ddim_sample_loop(
+                    self.model,
+                    x_start.shape,
+                    noise=torch.randn_like(x_start),
+                    clip_denoised=False,
+                    denoised_fn=partial(denoised_fn_round, args, model_emb,
+                                        subword_mask=subword_mask),
+                    model_kwargs={},
+                    top_p=0,
+                    clamp_step=0,
+                    clamp_first=True,
+                    mask=input_ids_mask,
+                    x_start=x_start,
+                    gap=10,
+                )
+                sample = samples[-1][:, fuse_len:fuse_len + ans_len, :]
+                logits  = self.model.get_logits(sample)
+                logits  = logits.masked_fill(
+                    subword_mask.unsqueeze(0).unsqueeze(0), float('-inf'))
+                return logits.argmax(dim=-1)  # [B, ans_len]
+
+        tokens1 = _sample(seed=42)
+        tokens2 = _sample(seed=42)
+        assert torch.equal(tokens1, tokens2), (
+            "Sampling with the same seed produced different token sequences — "
+            "non-determinism in the sampling path."
+        )
+        print(f"\n  Sampling determinism: OK (seed=42 → identical tokens both runs)")
+
+    def test_conditioning_affects_sampling_output(self):
+        """
+        The diffusion backbone (TransformerNetModel.forward) must produce different
+        denoised embeddings when the fuse portion of x differs.
+
+        We compare backbone output for the same noisy answer tokens but two different
+        fuse conditioning vectors (real vs. zero).  A single forward pass suffices —
+        no need to run full DDIM, which would add stochastic noise on top of the
+        conditioning signal and make comparison unreliable for an untrained model.
+
+        If the output L2 distance is near zero, the backbone ignores the fuse prefix
+        entirely — conditioning is broken.
+        """
+        cond    = fake_cond()
+        img     = fake_image()
+        ans_len = cond["input_a_id"].size(1)
+
+        with torch.no_grad():
+            real_fuse, _ = self.model.get_ddpm_input(
+                img, {"input_q_id": cond["input_q_id"]})
+
+        fuse_len  = real_fuse.size(1)
+        zero_fuse = torch.zeros_like(real_fuse)
+
+        torch.manual_seed(7)
+        ans_noise = torch.randn(B, ans_len, H, device=DEVICE)
+
+        x_real = torch.cat([real_fuse, ans_noise], dim=1)
+        x_zero = torch.cat([zero_fuse, ans_noise], dim=1)
+
+        t = torch.full((B,), 50, dtype=torch.long, device=DEVICE)
+
+        with torch.no_grad():
+            out_real = self.model(x_real, t)  # [B, fuse_len+ans_len, H]
+            out_zero = self.model(x_zero, t)
+
+        # Compare only the answer portion
+        ans_real = out_real[:, fuse_len:, :]
+        ans_zero = out_zero[:, fuse_len:, :]
+
+        l2_diff = (ans_real - ans_zero).norm(dim=-1).mean().item()
+        print(f"\n  Backbone ans-output L2 diff (real vs zero fuse): {l2_diff:.4f}")
+        assert l2_diff > 0.01, (
+            f"Backbone answer output is identical for real vs zero fuse (L2={l2_diff:.6f}) — "
+            f"conditioning prefix has no effect on the answer denoising path."
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Standalone runner
 # ══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
@@ -693,6 +935,7 @@ if __name__ == "__main__":
         TestGetLogits,
         TestDiffusionLoss,
         TestEndToEndGradientFlow,
+        TestLearningDynamics,
     ]
 
     passed = failed = 0

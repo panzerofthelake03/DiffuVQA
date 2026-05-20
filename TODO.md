@@ -87,3 +87,6 @@
 - [x] `diffuvqa/gaussian_diffusion.py` — `decoder_nll` loss'a geri eklendi (embedding vocab anchor — avg_nn_l2 drift düzeltmesi)
 - [x] `diffuvqa/rounding.py` — `get_efficient_knn` + `denoised_fn_round`'a `subword_mask` eklendi: `##` tokenlar DDIM trajectory'den dışlandı
 - [x] `sample_vqa_GPU.py` — `##` token logit maskeleme eklendi: `get_logits` sonrası `topk` öncesi `masked_fill(-inf)` ile final çıktıdan `##` tokenlar tamamen çıkarıldı
+- [x] `diffuvqa/gaussian_diffusion.py` — `model_kwargs` pollution fix: `input_a_id` dict access → `pop` yapıldı; `image_name` de `pop` ile temizlendi (`_WrappedModel` yuttuğu için öğrenmeyi bozmuyordu, kod doğruluğu için fix)
+- [x] `tests/test_architecture.py` — 9 modül, 40 test: mimari testler (36) + öğrenme dinamikleri (4: loss azalma, avg_nn_l2 yakınsama, sampling deterministiklik, conditioning etkisi) — tümü geçiyor
+- [x] **KRİTİK BUG 14**: `diffuvqa/vqa_model.py` — `get_logits` logits_mode=2: `clamp(0.0)` → `clamp(1e-12)`: `decoder_nll` ile `x_start_mean` vocab embedding'i olunca `dist≈0` → `sqrt(0)` backward `inf` → step 1'de tüm parametreler NaN. Bu bug `decoder_nll` eklendiği andan itibaren her training run'ı mahvediyordu.
