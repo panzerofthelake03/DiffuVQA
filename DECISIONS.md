@@ -5,6 +5,23 @@ En son alınan karar en üstte yer alır.
 
 ---
 
+## 2026-05-21
+
+### [KARAR] LR 5e-5 → 7e-5, sıfırdan eğitim
+**Değişiklik:** `diffuvqa/config.json` → `lr: 0.00007`. Notebook `LR = 0.00007`, `CHECKPOINT_PATH` → `lr7e-05`, `RESUME_CHECKPOINT = None`.
+
+**Bağlam:** `use_noising_f=True` ile 22.5K adım sonucu: loss %98.8 düştü (19.24 → 0.28) ama sampling %100 garbled. MSE step 8K'dan sonra ~0.006'da dondu — diffusion backbone hiç ilerlemedi, sadece NLL düşüyordu. avg_nn_l2 JSONL'e yazılmamış. Token collapse devam etti (`the`, `in`, `?` hakimiyeti). Grad norm 0.81'e düştü — backbone yeterli sinyal almıyor.
+
+**Hipotez:** `5e-5` LR backbone'u hareket ettirmek için yetersiz. NLL loss vocab'ı ezberliyor ama MSE (diffusion trajectory) öğrenilemiyor. `7e-5` ile backbone gradient adımı büyüyecek, MSE'nin de düşmeye başlaması bekleniyor.
+
+**Neden `1e-4` değil `7e-5`:** NLL öğrenmesini bozmamak için konservatif artış. `1e-4` mevcut NLL ilerlemesini unstable hale getirebilir.
+
+**Beklenti:** 10K'da MSE'nin 0.006'nın altına inmesi. 25K sampling'de token collapse azalması.
+
+**Alternatif (gerekirse):** `1e-4` dene, veya `mse_weight > 1.0` ile MSE loss'unu direkt ağırlıklandır.
+
+---
+
 ## 2026-05-20
 
 ### [KARAR] `use_noising_f=True` ile sıfırdan eğitim — CIGN aktif

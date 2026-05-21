@@ -1,5 +1,5 @@
 {
-  "lr": 0.00001,
+  "lr": 0.00007,
   "batch_size": 20,
   "learning_steps": 500000,
   "microbatch":64,
