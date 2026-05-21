@@ -120,7 +120,6 @@ class feature_fusion(nn.Module):
         # --- Question encoding ---
         q_ids = cond.pop('input_q_id')
         q_mask = (q_ids != 0).long().to(q_ids.device)
-        q_input_shape = q_mask.size()
 
         seq_len = q_ids.size(1)
         position_ids = torch.arange(seq_len, dtype=torch.long, device=q_ids.device).unsqueeze(0)
@@ -131,10 +130,12 @@ class feature_fusion(nn.Module):
         question_emb = self.bert_embedding_layer_norm(token_emb + position_emb + token_type_emb)
         question_emb = self.bert_embedding_dropout(question_emb)
 
-        extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, dtype=question_emb.dtype)
-        question_feats = question_emb
-        for layer in self.bert.encoder.layer:
-            question_feats = layer(question_feats, extended_q_masks)[0]
+        encoder_out = self.bert.encoder(
+            question_emb,
+            attention_mask=q_mask,
+            output_hidden_states=False,
+        )
+        question_feats = encoder_out.last_hidden_state
         question_feats = self.question_feature_proj(question_feats)
 
         # --- Image encoding ---
