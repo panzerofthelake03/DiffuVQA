@@ -7,6 +7,23 @@ En son alınan karar en üstte yer alır.
 
 ## 2026-05-21
 
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — `terms["nll"]` loss'tan çıkarıldı
+**Değişiklik:** `terms["loss"] = terms["mse"] + terms["nll"] + decoder_nll + pre_answer_loss` → `terms["loss"] = terms["mse"] + decoder_nll + pre_answer_loss`
+
+**Bağlam:** 32.5K sampling (LR=7e-5, use_noising_f=True): avg_nn_l2=23.754 — tüm run'larda aynı. MSE 0.005'e inmiş ama avg_nn_l2 sıfır hareket. Sampling %100 garbled, collapse %67.1'e yükseldi.
+
+**Teşhis:** `terms["nll"] = _token_discrete_loss(model_out_x_start, get_logits, input_ids_a)` — denoised embedding'i vocab'a çekiyor. `decoder_nll = _token_discrete_loss(x_start_mean, get_logits, input_ids_a)` — temiz embedding'i vocab'a çekiyor. Her ikisi de `lm_head.weight = word_embedding.weight` (tied tensor) üzerinden gradient itiyor. MSE ise embedding'i ans_emb yönüne çekiyor. Üç zıt yönde gradient → net hareket sıfır → avg_nn_l2 donuyor.
+
+**Hipotez:** `terms["nll"]` kaldırılınca `decoder_nll` (x_start_mean → vocab anchor) + `mse` (trajectory doğruluğu) ikisi birlikte çalışır. `decoder_nll` tied tensor'ü vocab'a sabitler, `mse` diffusion trajectory'yi düzeltir — çatışma ortadan kalkar.
+
+**Beklenti:** avg_nn_l2'nin 25K'da ilk kez 23.75'ten aşağıya inmesi.
+
+**Alternatif (gerekirse):** `decoder_nll`'i de kaldır, sadece `mse` ile dene — saf diffusion trajectory öğrenmesi.
+
+**Checkpoint klasörü:** `lr7e-05-no-nll` (önceki run'lardan ayrı).
+
+---
+
 ### [KARAR] LR 5e-5 → 7e-5, sıfırdan eğitim
 **Değişiklik:** `diffuvqa/config.json` → `lr: 0.00007`. Notebook `LR = 0.00007`, `CHECKPOINT_PATH` → `lr7e-05`, `RESUME_CHECKPOINT = None`.
 

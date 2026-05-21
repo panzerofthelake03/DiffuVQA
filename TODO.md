@@ -2,8 +2,8 @@
 
 ## Aktif Görevler
 
-- [ ] LR=7e-5, `use_noising_f=True` ile sıfırdan eğitim — 10K'da MSE < 0.006 oldu mu, 25K'da sampling yap
-- [ ] MSE hala donuyorsa: `lr=1e-4` veya `mse_weight > 1.0` dene
+- [ ] `terms["nll"]` kaldırıldı, LR=7e-5, `use_noising_f=True` — 25K'da sampling yap, avg_nn_l2 < 20 oldu mu kontrol et
+- [ ] avg_nn_l2 hala donuyorsa: `decoder_nll`'i de kaldır, sadece `mse` ile dene
 - [ ] 200k sonrası sampling sweep: `(decode_top_k=5, min_answer_tokens=2, conf=0.25)`, `(5, 2, 0.20)`, `(7, 2, 0.20)` kombinasyonlarını dene
 - [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
 - [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (eğitim olgunlaşınca)
