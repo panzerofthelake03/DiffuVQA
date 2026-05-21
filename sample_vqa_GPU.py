@@ -174,20 +174,25 @@ def main():
 
     tokenizer = load_tokenizer(args)
 
-    # Build ## subword mask: PubMedBERT WordPiece continuation tokens start with ##.
-    # Excluded from both intermediate rounding (Decision 22) and final logit selection (Decision 23).
-    subword_mask = None
+    # Build ## subword mask from tokenizer vocab (raw size matches tokenizer).
+    # Two derived masks are created after model_emb is known:
+    #   subword_mask       — sized to model_emb vocab (used in rounding, Decision 22)
+    #   subword_mask_logits — sized to lm_head vocab  (used in logit masking, Decision 23)
+    _raw_subword_mask = None
     try:
         _inner_tok = tokenizer.tokenizer
         if hasattr(_inner_tok, 'get_vocab'):
             _vocab = _inner_tok.get_vocab()
-            subword_mask = th.zeros(len(_vocab), dtype=th.bool)
+            _raw_subword_mask = th.zeros(len(_vocab), dtype=th.bool)
             for token, idx in _vocab.items():
                 if token.startswith('##'):
-                    subword_mask[idx] = True
-            logger.log(f"### Subword mask: {subword_mask.sum().item()} ## tokens excluded from rounding and logits")
+                    _raw_subword_mask[idx] = True
+            logger.log(f"### Subword mask (raw): {_raw_subword_mask.sum().item()} ## tokens, tokenizer vocab={len(_vocab)}")
     except Exception as e:
         logger.log(f"### Warning: could not build subword_mask ({e}), ## tokens not excluded")
+
+    subword_mask = None        # for rounding  (model_emb vocab size)
+    subword_mask_logits = None # for get_logits (lm_head vocab size)
 
     # Create a model embedding object for nearest-neighbor / rounding.
     # If the pretrained word embedding dim matches args.hidden_dim we can clone it,
@@ -204,17 +209,25 @@ def main():
         except Exception:
             pass
 
-    # Align subword_mask size to actual model vocab (tokenizer and model vocab may differ).
-    if subword_mask is not None:
-        actual_vocab = model_emb.weight.size(0)
-        if subword_mask.size(0) != actual_vocab:
-            logger.log(f"### Resizing subword_mask {subword_mask.size(0)} → {actual_vocab} to match model vocab")
-            if subword_mask.size(0) > actual_vocab:
-                subword_mask = subword_mask[:actual_vocab]
-            else:
-                padded = th.zeros(actual_vocab, dtype=th.bool)
-                padded[:subword_mask.size(0)] = subword_mask
-                subword_mask = padded
+    def _fit_mask(raw, target_size):
+        """Resize a bool mask to target_size by truncating or zero-padding."""
+        if raw is None:
+            return None
+        if raw.size(0) == target_size:
+            return raw
+        if raw.size(0) > target_size:
+            return raw[:target_size]
+        padded = th.zeros(target_size, dtype=th.bool)
+        padded[:raw.size(0)] = raw
+        return padded
+
+    if _raw_subword_mask is not None:
+        emb_vocab  = model_emb.weight.size(0)
+        lm_vocab   = model.lm_head.weight.size(0)
+        subword_mask        = _fit_mask(_raw_subword_mask, emb_vocab)
+        subword_mask_logits = _fit_mask(_raw_subword_mask, lm_vocab)
+        logger.log(f"### subword_mask: emb={emb_vocab} ({subword_mask.sum().item()} ##), "
+                   f"logits={lm_vocab} ({subword_mask_logits.sum().item()} ##)")
 
     set_seed(args.seed2)
 
@@ -361,9 +374,9 @@ def main():
     # sample shape suppressed
         logits = model.get_logits(sample)
         # Decision 23: exclude ## continuation tokens from final token selection
-        if subword_mask is not None:
+        if subword_mask_logits is not None:
             logits = logits.masked_fill(
-                subword_mask.to(logits.device).unsqueeze(0).unsqueeze(0),
+                subword_mask_logits.to(logits.device).unsqueeze(0).unsqueeze(0),
                 float('-inf')
             )
         probs = th.softmax(logits, dim=-1)
