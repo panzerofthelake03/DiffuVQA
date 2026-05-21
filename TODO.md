@@ -2,8 +2,8 @@
 
 ## Aktif Görevler
 
-- [ ] `terms["nll"]` kaldırıldı, LR=7e-5, `use_noising_f=True` — 25K'da sampling yap, avg_nn_l2 < 20 oldu mu kontrol et
-- [ ] avg_nn_l2 hala donuyorsa: `decoder_nll`'i de kaldır, sadece `mse` ile dene
+- [ ] 3 mimari bug fix sonrası sıfırdan eğitim (LR=7e-5, use_noising_f=True) — 25K'da sampling yap, avg_nn_l2 < 20 ve collapse azaldı mı kontrol et
+- [ ] avg_nn_l2 hala ~23.75 ise: loss ağırlıklarını gözden geçir (decoder_nll vs nll oranı)
 - [ ] 200k sonrası sampling sweep: `(decode_top_k=5, min_answer_tokens=2, conf=0.25)`, `(5, 2, 0.20)`, `(7, 2, 0.20)` kombinasyonlarını dene
 - [ ] Eval script düzeltmesi — `yes_no_acc`, `f1_score`, `bert_score` sıfır hatası giderilecek
 - [ ] Chatbot arayüzü: `inference.py` wrapper + Gradio endpoint (eğitim olgunlaşınca)

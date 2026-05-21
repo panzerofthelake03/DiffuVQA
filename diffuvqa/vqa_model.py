@@ -132,8 +132,9 @@ class feature_fusion(nn.Module):
         question_emb = self.bert_embedding_dropout(question_emb)
 
         extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_input_shape, dtype=question_emb.dtype)
+        question_feats = question_emb
         for layer in self.bert.encoder.layer:
-            question_feats = layer(question_emb, extended_q_masks)[0]
+            question_feats = layer(question_feats, extended_q_masks)[0]
         question_feats = self.question_feature_proj(question_feats)
 
         # --- Image encoding ---

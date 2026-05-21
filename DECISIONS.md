@@ -7,20 +7,41 @@ En son alınan karar en üstte yer alır.
 
 ## 2026-05-21
 
-### [KARAR] `diffuvqa/gaussian_diffusion.py` — `terms["nll"]` loss'tan çıkarıldı
-**Değişiklik:** `terms["loss"] = terms["mse"] + terms["nll"] + decoder_nll + pre_answer_loss` → `terms["loss"] = terms["mse"] + decoder_nll + pre_answer_loss`
+### [BUG FIX] `diffuvqa/vqa_model.py` + `diffuvqa/config.json` — 3 kritik mimari bug düzeltildi
 
-**Bağlam:** 32.5K sampling (LR=7e-5, use_noising_f=True): avg_nn_l2=23.754 — tüm run'larda aynı. MSE 0.005'e inmiş ama avg_nn_l2 sıfır hareket. Sampling %100 garbled, collapse %67.1'e yükseldi.
+**Bug A — `feature_fusion.forward()`: BERT encoder döngüsü bozuktu**
+```python
+# ÖNCE (bug): her layer aynı question_emb'den başlıyordu
+for layer in self.bert.encoder.layer:
+    question_feats = layer(question_emb, extended_q_masks)[0]
 
-**Teşhis:** `terms["nll"] = _token_discrete_loss(model_out_x_start, get_logits, input_ids_a)` — denoised embedding'i vocab'a çekiyor. `decoder_nll = _token_discrete_loss(x_start_mean, get_logits, input_ids_a)` — temiz embedding'i vocab'a çekiyor. Her ikisi de `lm_head.weight = word_embedding.weight` (tied tensor) üzerinden gradient itiyor. MSE ise embedding'i ans_emb yönüne çekiyor. Üç zıt yönde gradient → net hareket sıfır → avg_nn_l2 donuyor.
+# SONRA (fix): her layer bir öncekinin çıktısını alıyor
+question_feats = question_emb
+for layer in self.bert.encoder.layer:
+    question_feats = layer(question_feats, extended_q_masks)[0]
+```
+**Etki:** 12 BERT layer'ından yalnızca sonuncusu efektif olarak kullanılıyordu. Question encoding tamamen shallow — model soruyu neredeyse anlayamıyordu. Conditioning sinyali bu yüzden zayıftı.
 
-**Hipotez:** `terms["nll"]` kaldırılınca `decoder_nll` (x_start_mean → vocab anchor) + `mse` (trajectory doğruluğu) ikisi birlikte çalışır. `decoder_nll` tied tensor'ü vocab'a sabitler, `mse` diffusion trajectory'yi düzeltir — çatışma ortadan kalkar.
+---
 
-**Beklenti:** avg_nn_l2'nin 25K'da ilk kez 23.75'ten aşağıya inmesi.
+**Bug B — `get_logits` logits_mode=2: `output_dims=512 ≠ lm_head.weight dim=768` mismatch**
+`th.mm(lm_head.weight[30522,768], text_emb_t[512,N])` — matmul boyut uyumsuzluğu. `output_down_proj` 512 dim çıktı üretiyordu ama `lm_head.weight` 768 bekliyordu. `get_logits` yanlış L2 hesabı yapıyordu — avg_nn_l2'nin ~23.75'te sabit kalmasının mimariye dayalı sebebi bu.
+**Fix:** `config.json` → `output_dims: 768`. `output_down_proj` artık oluşturulmuyor.
 
-**Alternatif (gerekirse):** `decoder_nll`'i de kaldır, sadece `mse` ile dene — saf diffusion trajectory öğrenmesi.
+---
 
-**Checkpoint klasörü:** `lr7e-05-no-nll` (önceki run'lardan ayrı).
+**Bug C — `input_dims=128`: word_embedding embed dim mismatch**
+`word_embedding` BERT'ten 768 dim geliyor. `input_dims=128` ise `input_up_proj(128→768)` oluşturuyordu ama `get_embeds()` 768 döndürüyordu. Model girişinde boyut karışıklığı.
+**Fix:** `config.json` → `input_dims: 768`. `word_embedding_proj` ve `input_up_proj` artık oluşturulmuyor.
+
+---
+
+**Özet:** Bu 3 bug birlikte modelin conditioning'i, logit hesabını ve embedding boyutlarını temelden bozuyordu. avg_nn_l2'nin tüm run'larda ~23.75'te sabit kalmasının kök sebebi bunlar. Tüm önceki run'lar bozuk mimaride yapıldı — fix sonrası sıfırdan eğitim şart.
+
+---
+
+### [KARAR] `diffuvqa/gaussian_diffusion.py` — `terms["nll"]` kaldırılıp geri eklendi *(iptal)*
+Mimari bug'lar keşfedilince bu değişiklik geri alındı. Asıl sorun loss formülü değil, mimariydi. `terms["nll"]` loss'ta kalmaya devam ediyor.
 
 ---
 

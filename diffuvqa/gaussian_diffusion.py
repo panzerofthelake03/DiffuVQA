@@ -534,7 +534,7 @@ class GaussianDiffusion:
         else:
             pre_answer_loss = th.zeros_like(terms["mse"])
 
-        terms["loss"] = terms["mse"] + decoder_nll + pre_answer_loss
+        terms["loss"] = terms["mse"] + terms["nll"] + decoder_nll + pre_answer_loss
         terms["loss"] = th.nan_to_num(terms["loss"], nan=0.0, posinf=100.0, neginf=0.0)
 
         return terms
