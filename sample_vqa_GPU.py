@@ -204,6 +204,18 @@ def main():
         except Exception:
             pass
 
+    # Align subword_mask size to actual model vocab (tokenizer and model vocab may differ).
+    if subword_mask is not None:
+        actual_vocab = model_emb.weight.size(0)
+        if subword_mask.size(0) != actual_vocab:
+            logger.log(f"### Resizing subword_mask {subword_mask.size(0)} → {actual_vocab} to match model vocab")
+            if subword_mask.size(0) > actual_vocab:
+                subword_mask = subword_mask[:actual_vocab]
+            else:
+                padded = th.zeros(actual_vocab, dtype=th.bool)
+                padded[:subword_mask.size(0)] = subword_mask
+                subword_mask = padded
+
     set_seed(args.seed2)
 
     logger.log(f"### Sampling...on {args.split}")
