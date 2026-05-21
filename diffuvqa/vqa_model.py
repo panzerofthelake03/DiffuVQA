@@ -130,9 +130,10 @@ class feature_fusion(nn.Module):
         question_emb = self.bert_embedding_layer_norm(token_emb + position_emb + token_type_emb)
         question_emb = self.bert_embedding_dropout(question_emb)
 
+        extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_mask.shape)
         encoder_out = self.bert.encoder(
             question_emb,
-            attention_mask=q_mask,
+            attention_mask=extended_q_masks,
             output_hidden_states=False,
         )
         question_feats = encoder_out.last_hidden_state
