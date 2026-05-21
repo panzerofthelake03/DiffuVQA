@@ -9,18 +9,24 @@ En son alınan karar en üstte yer alır.
 
 ### [BUG FIX] `diffuvqa/vqa_model.py` + `diffuvqa/config.json` — 3 kritik mimari bug düzeltildi
 
-**Bug A — `feature_fusion.forward()`: BERT encoder döngüsü bozuktu**
+**Bug A — `feature_fusion.forward()`: BERT encoder döngüsü bozuktu + attention mask shape hatası**
+
+İlk tespit: her layer aynı `question_emb`'den başlıyordu → 12 layer'dan yalnızca sonuncusu efektif kullanılıyordu.
+
+İkinci tespit (runtime): manuel layer loop `bert.encoder()` ile değiştirilince yeni transformers'da `BertLayer.forward()` `[B, 1, 1, seq_len]` formatında extended mask bekliyor, `[B, seq_len]` değil. `sdpa_attention_forward` içinde `tensor a (64) must match tensor b (32)` şeklinde patladı.
+
 ```python
-# ÖNCE (bug): her layer aynı question_emb'den başlıyordu
+# ÖNCE (bug 1): her layer aynı question_emb'den başlıyor
 for layer in self.bert.encoder.layer:
     question_feats = layer(question_emb, extended_q_masks)[0]
 
-# SONRA (fix): her layer bir öncekinin çıktısını alıyor
-question_feats = question_emb
-for layer in self.bert.encoder.layer:
-    question_feats = layer(question_feats, extended_q_masks)[0]
+# SONRA (final fix): bert.encoder() ile + doğru extended mask
+extended_q_masks = self.bert.get_extended_attention_mask(q_mask, q_mask.shape)
+encoder_out = self.bert.encoder(question_emb, attention_mask=extended_q_masks, output_hidden_states=False)
+question_feats = encoder_out.last_hidden_state
 ```
-**Etki:** 12 BERT layer'ından yalnızca sonuncusu efektif olarak kullanılıyordu. Question encoding tamamen shallow — model soruyu neredeyse anlayamıyordu. Conditioning sinyali bu yüzden zayıftı.
+
+**Etki:** 12 BERT layer'ı artık sıralı ve doğru çalışıyor. Question encoding derin — model soruyu tam anlayabiliyor.
 
 ---
 
