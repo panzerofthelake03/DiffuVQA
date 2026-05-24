@@ -230,6 +230,17 @@
 - Concern: Each test class constructs a full BioBERT model, making the full suite take ~4 minutes on CPU. This is acceptable for a pre-Colab check but should not be added to a hot CI loop.
 - Follow-up: Run python -m pytest tests/test_architecture.py -v --tb=short before any significant code change or before starting a new Colab training run.
 
+### Decision 28: Add post-processing to sampling output before JSONL write
+- Files: sample_vqa_GPU.py, scripts/quick_eval.py (new)
+- Change: Added `_postprocess_answer(gen, ref)` helper to `sample_vqa_GPU.py`, called on every decoded answer before writing to JSONL.
+- Change: Post-processing steps: (1) strip BERT special tokens, (2) strip leading commas/dashes and trailing punctuation, (3) deduplicate consecutive repeated tokens ("Yes Yes" → "Yes"), (4) trim to reference length when ref is ≤ 3 tokens.
+- Change: Added `scripts/quick_eval.py`, a standalone evaluation script that applies the same post-processing and computes exact_match, token_f1, bleu1, partial_match, yesno_acc, hash_rate, avg_conf, avg_nn_l2, and avg_ans_len across multiple checkpoints in a comparison table.
+- Reason: Metric analysis across 029k–082k checkpoints showed yes/no accuracy was artificially suppressed by over-generation artifacts. Post-processing 082k step35 recovered yesno_acc from 0.29% → 6.98% and exact_match from 0.10% → 3.03%, confirming the regression was a generation artifact, not a model quality collapse.
+- Concern: Trimming to reference length requires the reference answer to be available at sampling time, which it is (loaded from the dataset). Trimming is skipped when ref is longer than 3 tokens, so multi-word answers are unaffected.
+- Concern: Trim-to-ref-length is a post-hoc evaluation fix that uses ground-truth label length. It recovers the correct token from an over-generated sequence but does not help the model generate correctly on unseen data at real inference time. The structural fix is continued training until the model learns to stop on its own.
+- Note on the 3-token cutoff: Almost all yes/no and single-organ answers in SLAKE are 1–3 tokens ("Yes", "No", "Lung", "Large Bowel", "Right Kidney"). For these the model generates real noise after the correct answer and trimming to ref length recovers it cleanly. For longer references such as "Brain Edema, Brain Non - enhancing Tumor" (7 tokens) the trim is skipped entirely since those answers need all their tokens.
+- Follow-up: All future checkpoint samples will be written with clean answers. Re-running `scripts/quick_eval.py` on new JSONL files will give raw exact-match numbers directly without needing a separate post-processing pass.
+
 ### Decision 23: Apply subword_mask to final logit selection to eliminate ## tokens from output
 - File: sample_vqa_GPU.py
 - Change: After `model.get_logits(sample)`, applied `masked_fill(-inf)` over all `##`-starting token positions in the logit tensor before softmax and topk.

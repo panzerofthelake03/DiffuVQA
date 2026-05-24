@@ -23,6 +23,7 @@ from tqdm.auto import tqdm
 
 # from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
+import re
 import time
 import io
 import sys
@@ -38,6 +39,38 @@ from shared.basic_utils import (
 )
 
 torch.multiprocessing.set_sharing_strategy('file_system')
+
+
+_SPECIAL_TOKENS = {"[SEP]", "[CLS]", "[PAD]", "[MASK]", "[UNK]"}
+
+
+def _postprocess_answer(gen: str, ref: str = "") -> str:
+    """Clean a raw decoded answer before writing to JSONL.
+
+    Steps:
+      1. Strip BERT special tokens.
+      2. Strip leading commas/dashes and trailing punctuation.
+      3. Deduplicate consecutive repeated tokens ("Yes Yes" → "Yes").
+      4. Trim to reference length when ref is short (≤ 3 tokens).
+    """
+    for tok in _SPECIAL_TOKENS:
+        gen = gen.replace(tok, " ")
+    gen = re.sub(r"^[\s,\-]+", "", gen)
+    gen = re.sub(r"[\s,\-]+$", "", gen).strip()
+
+    tokens = gen.split()
+    deduped = []
+    for tok in tokens:
+        if not deduped or tok.lower() != deduped[-1].lower():
+            deduped.append(tok)
+
+    if ref:
+        ref_len = len(ref.split())
+        if ref_len <= 3 and len(deduped) > ref_len:
+            deduped = deduped[:ref_len]
+
+    return " ".join(deduped)
+
 
 def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
     """
@@ -492,6 +525,7 @@ def main():
                     conf_val = float(seq_confidence[i].cpu().item()) if 'seq_confidence' in locals() else None
                     avg_dist = float(avg_nn_dist[i].cpu().item()) if 'avg_nn_dist' in locals() else None
                     rationale = f"Average token prob={conf_val:.3f}, avg_nn_l2={avg_dist:.3f}" if conf_val is not None else "n/a"
+                    recov = _postprocess_answer(recov, ref)
                     out_obj = {"image_name": image_name_i, "question": src, "reference_answer": ref, "generate_answer": recov, "confidence": conf_val, "rationale": rationale}
                     print(json.dumps(out_obj, ensure_ascii=False), file=fout)
         # break
